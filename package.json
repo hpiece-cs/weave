@@ -1,0 +1,17 @@
+{
+  "name": "weave",
+  "version": "0.0.0",
+  "description": "Agentic workflow composer — discover installed skills, chain them into reusable workflows, orchestrate execution.",
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "weave": "./cli.js"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "install-weave": "node install.js"
+  }
+}

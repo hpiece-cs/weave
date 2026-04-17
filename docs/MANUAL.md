@@ -1,0 +1,219 @@
+# Weave — User Manual
+
+> 한국어: [MANUAL.ko.md](MANUAL.ko.md)
+
+Weave is an agentic workflow composer for Claude Code. It discovers skills installed across your Claude Code plugins, lets you chain them into reusable **workflow presets**, and orchestrates their execution step-by-step — persisting state to the filesystem so you can survive context compaction, rollback, and resume across sessions.
+
+---
+
+## 1. Install
+
+From the weave repo:
+
+```bash
+node install.js
+```
+
+Copies:
+- Runtime → `~/.weave/bin/` (or `$WEAVE_HOME/bin/`)
+- Skills → `~/.claude/skills/weave-*/` (12 commands)
+
+Uninstall:
+
+```bash
+rm -rf ~/.weave ~/.claude/skills/weave-*
+```
+
+To re-install after an update, just run `node install.js` again — idempotent.
+
+## 2. Core concepts
+
+| Term | Meaning |
+|---|---|
+| **Skill** | A single unit of Claude capability (e.g., `superpowers:brainstorming`). Lives as a `SKILL.md` file under `~/.claude/plugins/...` or `~/.claude/skills/`. |
+| **Preset** | A named, reusable ordered sequence of skills. JSON under `.weave/workflows/<name>.json`. |
+| **Session** | One execution of a preset. Tracks current step, outputs, notes. Stored at `<project>/.weave/session.json`. |
+| **Scope** | Where a preset lives: `project` (`<cwd>/.weave/workflows/`) or `global` (`~/.weave/workflows/`). |
+| **Step** | One entry in a preset. Has `skillId`, `checkpoint`, `interactive`, optional `requiresOutputsFrom`. |
+| **Checkpoint** | What happens after a step: `auto` (advance), `verify` (user confirms), `decision` (user picks). |
+| **Artifact** | A file produced by a step (spec, plan, code). Reported to weave via `artifact-register`. |
+
+## 3. Command reference
+
+All commands are slash commands in Claude Code.
+
+| Command | Purpose |
+|---|---|
+| `/weave:compose` | Create a new preset. Opens a new terminal window with an interactive tree picker. |
+| `/weave:list` | Show saved presets (project + global). |
+| `/weave:run <name>` | Execute a preset step-by-step. Add `--auto` for autonomous mode. |
+| `/weave:status` | Current session state, or restore after compaction. |
+| `/weave:history` | Completed steps with their artifacts. |
+| `/weave:ref <query>` | Search artifacts: `keyword:X`, `step:N`, `type:K`, or freeform. |
+| `/weave:note <text>` | Add a note to the current step (surfaces in future step wrappers). |
+| `/weave:next` | Manually advance when auto-advance missed. |
+| `/weave:rollback` | Revert current step to `pending`, previous step to `in_progress`. Files untouched. |
+| `/weave:debug` | Dump full session + config + git state. |
+| `/weave:manage` | Edit / clone / delete / promote / demote presets. |
+| `/weave:help` | Adaptive help (step-level when active, command map otherwise). |
+
+## 4. End-to-end walkthrough
+
+### Create a preset
+
+```
+/weave:compose
+```
+
+- A new terminal window pops up (Terminal.app / iTerm2 / gnome-terminal / etc. depending on OS).
+- Top tabs: `[ Main ]` (curated templates) / `[ All ]` (per-source browse). `Tab` switches.
+- Navigate with arrow keys; `+`/`-` expand/collapse template; `Space` toggles selection; `a` toggles-all in a template.
+- `Enter` on `SAVE` → asks for preset name + scope (`project` default).
+- If name conflicts in that scope: choose `overwrite` / `rename` / `cancel`.
+- Window closes automatically; Claude Code shows `✓ Saved preset X`.
+
+### Run it
+
+```
+/weave:run my-flow
+```
+
+Claude starts a session and walks each step:
+1. `guard` checks prerequisites
+2. `git-snapshot` captures state
+3. `context-bridge generate` injects the current skill's SKILL.md wrapped with weave context (previous outputs, notes, tools)
+4. Skill runs naturally — Claude follows the SKILL.md text
+5. `artifact-register` records files produced
+6. `advance` moves to next step
+7. Repeat until done; `end` archives the session
+
+### During a run
+
+| Want to | Type |
+|---|---|
+| See progress | `/weave:status` |
+| See what's been produced | `/weave:history` or `/weave:ref keyword:api` |
+| Leave context for later steps | `/weave:note consider auth middleware` |
+| Force-advance when stuck | `/weave:next` |
+| Undo last step | `/weave:rollback` |
+| Inspect internals | `/weave:debug` |
+
+### Autonomous mode
+
+```
+/weave:run my-flow --auto
+```
+
+Skills with `checkpoint=auto` and `interactive=false` advance without prompting. `verify`/`decision` checkpoints and interactive skills still pause.
+
+## 5. Scopes — project vs global
+
+**Project** (`<cwd>/.weave/workflows/`)
+- Lives with the codebase; commit it to share with your team.
+- Default scope for `compose`.
+- Picked first when you `run`.
+
+**Global** (`~/.weave/workflows/`)
+- Shared across all projects.
+- Good for personal recipes (TDD loop, code review loop).
+- Picked when the same name doesn't exist in project.
+
+Name collisions: project wins. Use `/weave:list` to see both with scope badges, and `/weave:manage` to promote (project → global) or demote (global → project).
+
+## 6. Context compaction & session recovery
+
+Weave's session state lives in `.weave/session.json` — survives context compaction since it's on disk.
+
+After compaction:
+```
+/weave:status
+```
+Claude calls `runtime restore` and regenerates the current step's wrapper. You pick up where you left off.
+
+After crashing / new terminal:
+Same — `/weave:status` auto-restores. If the `.lock` is stale (crashed process), the next `runtime start` reclaims it after 30s. To force: `rm <project>/.weave/.lock`.
+
+## 7. CLI (for scripting)
+
+All commands route through `~/.weave/bin/cli.js`:
+
+```bash
+node ~/.weave/bin/cli.js help
+node ~/.weave/bin/cli.js discover --workflow-only
+node ~/.weave/bin/cli.js storage list-scopes
+node ~/.weave/bin/cli.js storage save my-flow '<json>' [--scope=project|global]
+node ~/.weave/bin/cli.js runtime status
+# … and the 13 other runtime subcommands
+```
+
+Run `node ~/.weave/bin/cli.js help` for the full list.
+
+## 8. Preset JSON shape
+
+```json
+{
+  "schemaVersion": 1,
+  "name": "my-flow",
+  "created": "2026-04-17T...",
+  "updated": "2026-04-17T...",
+  "steps": [
+    {
+      "order": 1,
+      "skillId": "superpowers:brainstorming",
+      "checkpoint": "auto",
+      "interactive": true
+    },
+    {
+      "order": 2,
+      "skillId": "superpowers:writing-plans",
+      "checkpoint": "auto",
+      "interactive": true,
+      "requiresOutputsFrom": [0]
+    }
+  ],
+  "tools": ["gsd:debug"]
+}
+```
+
+Edit by hand anytime, or via `/weave:manage`.
+
+## 9. Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `/weave:compose` "Weave not installed" | `node install.js` from the weave repo. |
+| Compose terminal doesn't open (macOS) | macOS "Automation" permission — allow once in System Settings → Privacy & Security. |
+| Compose terminal doesn't open (Linux) | Install one of: gnome-terminal, konsole, alacritty, kitty, xterm. |
+| "Preset not found: X" | Wrong scope or name. `/weave:list` shows all. |
+| "Another weave session is running" | Stale lock. Wait 30s for auto-reclaim, or delete `<project>/.weave/.lock`. |
+| Step got stuck, no auto-advance | `/weave:next` with file list, or `/weave:debug` to inspect. |
+| Wrong output, want to redo | `/weave:rollback` then re-run the step. Files on disk are NOT reverted — use git if needed. |
+
+## 10. Where things live
+
+```
+~/.weave/
+├── bin/                   ← runtime (cli.js + core/ + demo/)
+├── workflows/             ← global presets
+└── cache/                 ← internal markers
+
+~/.claude/skills/
+└── weave-*/SKILL.md       ← 12 slash-command skills
+
+<project>/.weave/
+├── session.json           ← current session state
+├── .lock                  ← session lock (auto-reclaims after 30s stale)
+├── workflows/             ← project-local presets
+└── archive/               ← completed sessions
+```
+
+## 11. Badges reference
+
+The compose UI shows 2-3 letter badges next to each skill: `Q|I`, `W|M|I`, etc. Full reference: [badges.md](badges.md) / [badges.ko.md](badges.ko.md).
+
+## 12. Further reading
+
+- Design spec: `docs/superpowers/specs/2026-04-16-weave-workflow-composer-design.md`
+- Interface spec: `docs/superpowers/specs/2026-04-17-core-interface-spec.md`
+- Implementation plan: `docs/superpowers/plans/2026-04-17-weave-v1.md`
+- Core module notes: `docs/src-notes/`

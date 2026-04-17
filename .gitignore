@@ -1,0 +1,19 @@
+# Negate global gitignore exclusions we need
+!.gitignore
+!package.json
+!package-lock.json
+!*.json
+
+node_modules/
+.DS_Store
+
+# local session state (created when running demos/tests here)
+.weave/
+
+# project-local Claude Code settings (personal to each user)
+.claude/settings.local.json
+
+# editor
+.vscode/
+.idea/
+*.swp
