@@ -1,9 +1,30 @@
 ---
 name: weave-debug
 description: Debug a weave run — dump full session state plus config and git status for troubleshooting unexpected behavior.
+processStage: control
+processOrder: 5.1
+lifecycleGroup: session-recovery-diagnostics
+lifecycleGroupNames:
+  ko: 세션 복구 및 진단
+  en: Session Recovery & Diagnostics
+lifecycleOrder: 5.1
+usesWhen: Diagnose problems or inspect full session state and configuration
+skillNames:
+  ko: 상태 진단
+  en: Diagnose
+domain: session-control
+dataRole: diagnostician
+scope: project
+filePatterns:
+  - input: {proj}/.weave/session.json + {proj}/.weave/config.json + git status
+  - output: terminal display (comprehensive state dump, steps table, config, git status)
+mutates: false
+frequency: rare-on-error
 ---
 
 # /weave:debug
+
+> **Locale**: Reply in Korean if `$LANG` starts with `ko`, otherwise English. Applies to user-facing summaries, status, confirmations, and error messages.
 
 Use when something seems wrong with a running workflow and the user wants to inspect internal state.
 

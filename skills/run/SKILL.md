@@ -1,9 +1,30 @@
 ---
 name: weave-run
 description: Execute a saved workflow preset step-by-step — start session, then loop on `step prepare` → skill runs → `step finish`. Supports --auto autonomous mode. Uses combined commands to minimize Bash roundtrips.
+processStage: preparation
+processOrder: 2.1
+lifecycleGroup: active-session-management
+lifecycleGroupNames:
+  ko: 활성 세션 관리
+  en: Active Session Management
+lifecycleOrder: 2.1
+usesWhen: Launch or resume a workflow execution session
+skillNames:
+  ko: 세션 시작
+  en: Start Session
+domain: session-orchestration
+dataRole: session-orchestrator
+scope: project
+filePatterns:
+  - input: ~/.weave/workflows/*.json (preset) + {proj}/.weave/session.json (resume)
+  - output: {proj}/.weave/session.json + {proj}/.weave/.lock
+mutates: true
+frequency: rare-per-session
 ---
 
 # /weave:run
+
+> **Locale**: Reply in Korean if `$LANG` starts with `ko`, otherwise English. Applies to user-facing summaries, status, confirmations, and error messages.
 
 Use when the user invokes `/weave:run <preset>` or asks to execute a saved workflow.
 

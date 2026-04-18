@@ -1,9 +1,30 @@
 ---
 name: weave-history
 description: Show workflow history — completed steps with their registered artifacts and timestamps.
+processStage: tracking
+processOrder: 4.2
+lifecycleGroup: progress-monitoring
+lifecycleGroupNames:
+  ko: 진행상황 모니터링
+  en: Progress Monitoring
+lifecycleOrder: 4.2
+usesWhen: Review completed steps and their artifacts in chronological order
+skillNames:
+  ko: 완료 항목 조회
+  en: View History
+domain: session-query
+dataRole: history-reviewer
+scope: project
+filePatterns:
+  - input: {proj}/.weave/session.json (steps[status=completed])
+  - output: terminal display (step order, artifacts, timestamps, keywords)
+mutates: false
+frequency: variable
 ---
 
 # /weave:history
+
+> **Locale**: Reply in Korean if `$LANG` starts with `ko`, otherwise English. Applies to user-facing summaries, status, confirmations, and error messages.
 
 Use when the user wants to see what has been produced so far in the current workflow.
 

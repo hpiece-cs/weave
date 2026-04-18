@@ -1,9 +1,30 @@
 ---
 name: weave-manage
 description: Edit, delete, clone, or promote/demote saved workflow presets — scope-aware (project vs global).
+processStage: design
+processOrder: 1.3
+lifecycleGroup: workflow-library-management
+lifecycleGroupNames:
+  ko: 워크플로우 라이브러리 관리
+  en: Workflow Library Management
+lifecycleOrder: 1.3
+usesWhen: Refine, iterate, or redistribute workflow presets
+skillNames:
+  ko: 워크플로우 관리
+  en: Manage Presets
+domain: preset-management
+dataRole: preset-maintainer
+scope: global|project
+filePatterns:
+  - input: ~/.weave/workflows/*.json + .weave/workflows/*.json
+  - output: modified/deleted/cloned *.json presets
+mutates: true
+frequency: rare
 ---
 
 # /weave:manage
+
+> **Locale**: Reply in Korean if `$LANG` starts with `ko`, otherwise English. Applies to user-facing summaries, status, confirmations, and error messages.
 
 Use when the user wants to modify a saved preset (edit steps, delete, clone, or move between project and global scope).
 

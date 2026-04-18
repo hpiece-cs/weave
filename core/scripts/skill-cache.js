@@ -15,6 +15,13 @@ function computeFingerprints() {
   const commandsRoot = path.join(home, '.claude', 'commands');
   const result = {};
 
+  // Locale — cached groups may contain localized strings (phase descriptions,
+  // intent templates). When LANG changes between sessions the cache must
+  // invalidate so the next consumer re-renders with the right language.
+  const rawLang = process.env.LANG || 'en_US';
+  const lang = rawLang.startsWith('ko') ? 'ko' : 'en';
+  result.__locale = { lang };
+
   // superpowers (plugin)
   const plugins = discover.readInstalledPlugins();
   const sp = plugins.find(p => p.name === 'superpowers');
@@ -87,7 +94,9 @@ function fingerprintsMatch(cached, current) {
   for (const [key, cur] of Object.entries(current)) {
     const prev = cached[key];
     if (!prev) return false;
-    if ('version' in cur) {
+    if ('lang' in cur) {
+      if (prev.lang !== cur.lang) return false;
+    } else if ('version' in cur) {
       if (prev.version !== cur.version || prev.gitCommitSha !== cur.gitCommitSha) {
         return false;
       }

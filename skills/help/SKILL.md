@@ -1,9 +1,30 @@
 ---
 name: weave-help
 description: Show workflow-level help — what the current step expects, which tools are available, what commands exist. Adapts to session state.
+processStage: execution
+processOrder: 3.1
+lifecycleGroup: current-step-guidance
+lifecycleGroupNames:
+  ko: 현재 단계 가이드
+  en: Current Step Guidance
+lifecycleOrder: 3.1
+usesWhen: Get step-specific guidance at the start of each step
+skillNames:
+  ko: 도움말
+  en: Get Help
+domain: guidance
+dataRole: contextual-guide
+scope: project
+filePatterns:
+  - input: {proj}/.weave/session.json + {skillSource}/skills/{skillName}/SKILL.md
+  - output: terminal display (step info, available tools, next step)
+mutates: false
+frequency: frequent-per-step
 ---
 
 # /weave:help
+
+> **Locale**: Reply in Korean if `$LANG` starts with `ko`, otherwise English. Applies to user-facing summaries, status, confirmations, and error messages.
 
 Use when the user asks "what do I do now?" or "what commands does weave have?".
 

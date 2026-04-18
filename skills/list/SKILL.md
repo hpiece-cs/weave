@@ -1,9 +1,30 @@
 ---
 name: weave-list
 description: List saved workflow presets from both project (<cwd>/.weave/workflows/) and global (~/.weave/workflows/) scopes with step counts, source mix, and scope badge.
+processStage: design
+processOrder: 1.1
+lifecycleGroup: workflow-library-management
+lifecycleGroupNames:
+  ko: 워크플로우 라이브러리 관리
+  en: Workflow Library Management
+lifecycleOrder: 1.1
+usesWhen: Discover existing presets before composing or running workflows
+skillNames:
+  ko: 워크플로우 조회
+  en: Browse Workflows
+domain: preset-management
+dataRole: preset-discovery
+scope: global|project
+filePatterns:
+  - input: ~/.weave/workflows/*.json + .weave/workflows/*.json
+  - output: terminal display (name, steps, scope, updated time)
+mutates: false
+frequency: rare
 ---
 
 # /weave:list
+
+> **Locale**: Reply in Korean if `$LANG` starts with `ko`, otherwise English. Applies to user-facing summaries, status, confirmations, and error messages.
 
 Use when the user asks to see saved workflow presets.
 

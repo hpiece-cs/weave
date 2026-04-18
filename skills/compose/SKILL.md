@@ -1,9 +1,30 @@
 ---
 name: weave-compose
 description: Create a new workflow preset by composing installed skills. Opens an interactive tree UI in a NEW terminal window (macOS/Linux/Windows), waits for the user to finish there, closes the window, and reports what was saved. Never renders the tree inside the current Claude Code chat.
+processStage: design
+processOrder: 1.2
+lifecycleGroup: workflow-library-management
+lifecycleGroupNames:
+  ko: 워크플로우 라이브러리 관리
+  en: Workflow Library Management
+lifecycleOrder: 1.2
+usesWhen: Build custom multi-step workflows from available skills
+skillNames:
+  ko: 워크플로우 작성
+  en: Create Workflow
+domain: preset-management
+dataRole: preset-creator
+scope: global|project
+filePatterns:
+  - input: ~/.claude/skills/*/SKILL.md (discovered skills)
+  - output: ~/.weave/workflows/*.json or .weave/workflows/*.json
+mutates: true
+frequency: rare
 ---
 
 # /weave:compose
+
+> **Locale**: Reply in Korean if `$LANG` starts with `ko`, otherwise English. Applies to user-facing summaries, status, confirmations, and error messages.
 
 Use when the user wants to build a reusable multi-step workflow from installed skills.
 

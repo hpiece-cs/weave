@@ -1,9 +1,30 @@
 ---
 name: weave-status
 description: Show current workflow session status, or restore context after compaction if a session exists but the conversation has been compacted.
+processStage: tracking
+processOrder: 4.1
+lifecycleGroup: progress-monitoring
+lifecycleGroupNames:
+  ko: 진행상황 모니터링
+  en: Progress Monitoring
+lifecycleOrder: 4.1
+usesWhen: Check current session state or restore context after compaction
+skillNames:
+  ko: 진행상황 조회
+  en: Check Status
+domain: session-query
+dataRole: state-inspector
+scope: project
+filePatterns:
+  - input: {proj}/.weave/session.json
+  - output: terminal display (step, status, autoMode, checkpoint) + optional restore
+mutates: false-or-restore
+frequency: variable
 ---
 
 # /weave:status
+
+> **Locale**: Reply in Korean if `$LANG` starts with `ko`, otherwise English. Applies to user-facing summaries, status, confirmations, and error messages.
 
 Use when the user asks where they are in the workflow, or after context compaction to rehydrate state.
 

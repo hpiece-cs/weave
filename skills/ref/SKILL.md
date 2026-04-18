@@ -1,9 +1,30 @@
 ---
 name: weave-ref
 description: Search workflow artifacts across all completed steps. Supports keyword:/step:/type: prefixes, or freeform search across path + summary + keywords.
+processStage: tracking
+processOrder: 4.3
+lifecycleGroup: progress-monitoring
+lifecycleGroupNames:
+  ko: 진행상황 모니터링
+  en: Progress Monitoring
+lifecycleOrder: 4.3
+usesWhen: Find specific artifacts by keyword, type, or step number
+skillNames:
+  ko: 산출물 검색
+  en: Search Artifacts
+domain: session-query
+dataRole: artifact-searcher
+scope: project
+filePatterns:
+  - input: {proj}/.weave/session.json (outputs[]) + query string
+  - output: terminal display (matching artifacts with path, type, summary, keywords)
+mutates: false
+frequency: variable
 ---
 
 # /weave:ref
+
+> **Locale**: Reply in Korean if `$LANG` starts with `ko`, otherwise English. Applies to user-facing summaries, status, confirmations, and error messages.
 
 Use when the user asks "where did we produce X?" or "find the spec from step 2".
 

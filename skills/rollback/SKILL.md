@@ -1,9 +1,30 @@
 ---
 name: weave-rollback
 description: Revert session state to the previous step — resets outputs and completion timestamps, does NOT touch files or git history.
+processStage: control
+processOrder: 5.2
+lifecycleGroup: session-recovery-diagnostics
+lifecycleGroupNames:
+  ko: 세션 복구 및 진단
+  en: Session Recovery & Diagnostics
+lifecycleOrder: 5.2
+usesWhen: Undo the previous step and redo it (state only; files unchanged)
+skillNames:
+  ko: 단계 복구
+  en: Undo Step
+domain: session-control
+dataRole: state-reverter
+scope: project
+filePatterns:
+  - input: {proj}/.weave/session.json
+  - output: {proj}/.weave/session.json (currentStep--, steps[].status reverted)
+mutates: true
+frequency: rare-on-error
 ---
 
 # /weave:rollback
+
+> **Locale**: Reply in Korean if `$LANG` starts with `ko`, otherwise English. Applies to user-facing summaries, status, confirmations, and error messages.
 
 Use when the user wants to redo the previous step (e.g., realized the output was wrong).
 
