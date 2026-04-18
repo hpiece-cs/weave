@@ -136,9 +136,11 @@ function saveCache(fingerprints, groups) {
   fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2));
 }
 
-function getSkillGroups(buildGroupsFn) {
+function getSkillGroups(buildGroupsFn, { force = false } = {}) {
   const current = computeFingerprints();
-  const cached = loadCache();
+  // force=true 이면 디스크 캐시를 무시하고 항상 새로 discover·빌드한 뒤 재저장.
+  // compose UI 의 'r' (다시 읽기) 같이 사용자가 명시적으로 재스캔을 요청할 때 사용.
+  const cached = force ? null : loadCache();
 
   if (cached && fingerprintsMatch(cached.methodologies, current)) {
     // Cache hit: reconstruct byId from the cached groups
