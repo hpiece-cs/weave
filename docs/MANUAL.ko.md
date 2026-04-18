@@ -6,6 +6,23 @@ Weave는 Claude Code용 에이전트 워크플로우 컴포저. 설치된 Claude
 
 ---
 
+## 목차
+
+1. [설치](#1-설치)
+2. [핵심 개념](#2-핵심-개념)
+3. [커맨드 레퍼런스](#3-커맨드-레퍼런스)
+4. [처음부터 끝까지 워크스루](#4-처음부터-끝까지-워크스루)
+5. [Scope — project vs global](#5-scope--project-vs-global)
+6. [Context compaction & 세션 복구](#6-context-compaction--세션-복구)
+7. [CLI (스크립팅용)](#7-cli-스크립팅용)
+8. [Preset JSON 구조](#8-preset-json-구조)
+9. [문제 해결](#9-문제-해결)
+10. [파일 위치](#10-파일-위치)
+11. [Stage 분류 체계 (compose 그룹 기준)](#11-stage-분류-체계-compose-그룹-기준)
+12. [뱃지 레퍼런스](#12-뱃지-레퍼런스)
+
+---
+
 ## 1. 설치
 
 weave 리포 디렉토리에서:
@@ -16,7 +33,7 @@ node install.js
 
 복사되는 위치:
 - 런타임 → `~/.weave/bin/` (또는 `$WEAVE_HOME/bin/`)
-- 스킬 → `~/.claude/skills/weave-*/` (12개 슬래시 커맨드)
+- 스킬 → `~/.claude/skills/weave-*/` (13개 슬래시 커맨드)
 
 제거:
 
@@ -55,6 +72,7 @@ rm -rf ~/.weave ~/.claude/skills/weave-*
 | `/weave:rollback` | 현재 step을 `pending`, 이전 step을 `in_progress`로 되돌림. 파일은 건드리지 않음. |
 | `/weave:debug` | 세션 + 설정 + git 상태 전체 덤프. |
 | `/weave:manage` | preset 편집 / 복제 / 삭제 / 프로모트 / 디모트. |
+| `/weave:edit-session` | **진행 중** 세션에서 pending 스텝 skip / 새 스킬 insert. session.json 만 수정, preset 원본은 유지. |
 | `/weave:help` | 적응형 도움말 (세션 활성 시 step 수준, 아니면 커맨드 맵). |
 
 ## 4. 처음부터 끝까지 워크스루
@@ -68,7 +86,7 @@ rm -rf ~/.weave ~/.claude/skills/weave-*
 - 새 터미널 창이 뜸 (OS에 따라 Terminal.app / iTerm2 / gnome-terminal 등).
 - 픽커는 **디스커버된 모든 스킬을 프로젝트 생애주기 순서의 30개 canonical phase 그룹**으로 묶어 한 화면에 표시 (Onboarding → Alignment → Discovery → Research → Requirements 3종 → Design 4종 → Planning 3종 → Test Strategy → Implementation 2종 → Code Review → QA 계열 → CI/CD → User Testing → Integration & Ship → Retrospective → Milestone Close → Evolution) + 교차횡단 밴드 3종 (Control · Docs · Progress).
 - 각 그룹 내부는 방법론 우선순위 (`wds → bmad → bmad-testarch → bmad-cis → gds → gsd → superpowers`) → curated step 순서 → 알파벳 순으로 정렬.
-- 방향키로 네비게이션, `+`/`-` 로 phase 그룹 펼침/접음, `Space` 로 스킬 체크, `a` 로 현재 그룹 전체 토글, `s` 로 `SAVE` 액션에 점프.
+- `Up`/`Down` 으로 네비게이션 (`PageUp`/`PageDown` 은 10행 단위 점프), `+`/`-` (또는 `Right`/`Left`) 로 phase 그룹 펼침/접음 — skill 행에서 `Left` 는 부모 템플릿으로 점프, `Space` 또는 `Enter` 로 스킬 체크 (또는 `SAVE`/`QUIT` 액션 실행), `a` 로 현재 그룹 전체 토글, `r` 로 스킬 목록 다시 읽기(캐시 무시, 플러그인 추가·삭제 후 유용), `s` 로 `SAVE` 액션에 점프, `q` 또는 `Ctrl+C` 로 저장 없이 종료.
 - `SAVE` 에서 `Enter` → preset 이름 + scope 입력 (기본 `project`).
 - 같은 scope 에 이름 충돌 시: `overwrite` / `rename` / `cancel` 선택.
 - 창 자동 종료 → Claude Code 에 `✓ Saved preset X` 표시.
@@ -99,6 +117,7 @@ Claude가 세션을 시작하고 각 step을 돈다:
 | 나중 step을 위한 메모 | `/weave:note 인증 미들웨어 고려` |
 | 멈췄을 때 강제 진행 | `/weave:next` |
 | 직전 step 되돌리기 | `/weave:rollback` |
+| 남은 스텝 skip / 새 스킬 insert | `/weave:edit-session` |
 | 내부 상태 검사 | `/weave:debug` |
 
 ### 자율 모드
@@ -142,13 +161,34 @@ Claude가 `runtime restore`를 호출하고 현재 step의 wrapper를 재생성.
 ```bash
 node ~/.weave/bin/cli.js help
 node ~/.weave/bin/cli.js discover --workflow-only
+
+# storage
 node ~/.weave/bin/cli.js storage list-scopes
 node ~/.weave/bin/cli.js storage save my-flow '<json>' [--scope=project|global]
+node ~/.weave/bin/cli.js storage load my-flow [--scope=project|global]
+node ~/.weave/bin/cli.js storage remove my-flow [--scope=project|global]
+node ~/.weave/bin/cli.js storage clone <from> <to> [--from-scope=..] [--to-scope=..]
+
+# runtime — 총 18개 서브커맨드 (status + 그 외 17개)
 node ~/.weave/bin/cli.js runtime status
-# … 그 외 runtime 서브커맨드 13개
+# 그 외: start, end, advance, rollback, artifact-register, git-snapshot,
+#         history, debug, ref, note, restore, check-update, is-git-repo,
+#         session-outline, find-skill, insert-step, skip-step
+
+# step (/weave:run 내부에서 사용)
+node ~/.weave/bin/cli.js step prepare [--auto]            # guard + git-snapshot + wrapper
+node ~/.weave/bin/cli.js step finish '<artifacts-json>'   # register + advance + next wrapper
+
+# context-bridge / guard (저수준 헬퍼)
+node ~/.weave/bin/cli.js context-bridge generate [stepIndex] [--auto]
+node ~/.weave/bin/cli.js guard <stepIndex> <sessionJsonPath>
+
+# compose (새 터미널 창에서 열기 / 단일 픽)
+node ~/.weave/bin/cli.js compose-spawn
+node ~/.weave/bin/cli.js compose-pick [--session-checked=id1,id2,...]   # /weave:edit-session 의 single-pick
 ```
 
-전체 목록은 `node ~/.weave/bin/cli.js help`.
+표준 사용법 문자열: `node ~/.weave/bin/cli.js help`.
 
 ## 8. Preset JSON 구조
 
@@ -200,7 +240,7 @@ node ~/.weave/bin/cli.js runtime status
 └── cache/                 ← 내부 마커
 
 ~/.claude/skills/
-└── weave-*/SKILL.md       ← 12개 슬래시 커맨드 스킬
+└── weave-*/SKILL.md       ← 13개 슬래시 커맨드 스킬
 
 <project>/.weave/
 ├── session.json           ← 현재 세션 상태
@@ -219,15 +259,9 @@ Onboarding · Alignment · Discovery · Research · Requirements — Mapping · 
 **교차횡단 밴드 (3개)**
 Control · Docs · Progress
 
-분류 파이프라인 (상세: `docs/src-notes/core_scripts_discover.md`): `processStage` frontmatter → `OVERRIDE_TABLE` → `STAGE_KEYWORDS` → `'Other'`.
+분류 파이프라인: `processStage` frontmatter → `OVERRIDE_TABLE` → `STAGE_KEYWORDS` → `'Other'`.
 
 ## 12. 뱃지 레퍼런스
 
 compose UI는 각 스킬 옆에 2–3글자 뱃지를 표시함: `Q|I`, `W|M|I` 등. 전체 설명: [badges.ko.md](badges.ko.md) / [badges.md](badges.md).
 
-## 13. 더 읽을거리
-
-- 디자인 스펙: `docs/superpowers/specs/2026-04-16-weave-workflow-composer-design.md`
-- 인터페이스 스펙: `docs/superpowers/specs/2026-04-17-core-interface-spec.md`
-- 구현 플랜: `docs/superpowers/plans/2026-04-17-weave-v1.md`
-- core 모듈 노트: `docs/src-notes/`

@@ -91,7 +91,7 @@ All session state lives as JSON on disk. So:
 
 Simplified for the user:
 
-- **Top — the instructions layer.** 12 skills surfaced as slash commands (`/weave:compose`, `/weave:run`, …). The agent reads and executes them.
+- **Top — the instructions layer.** 13 skills surfaced as slash commands (`/weave:compose`, `/weave:run`, …). The agent reads and executes them.
 - **Bottom — the state layer.** Presets, sessions, artifacts, locks. All files, all human-readable.
 
 This split keeps Weave independent of any particular agent implementation and mostly immune to model / CLI / version upgrades.
@@ -131,13 +131,13 @@ node install.js
 This copies:
 
 - Runtime → `~/.weave/bin/` (override with `$WEAVE_HOME`)
-- Skills → `~/.claude/skills/weave-*/` (12 slash commands)
+- Skills → `~/.claude/skills/weave-*/` (13 slash commands)
 
 The installer is idempotent — rerunning is safe.
 
 ### 3. Verify
 
-Open Claude Code and type `/weave:` — the 12 slash commands should appear in the command list.
+Open Claude Code and type `/weave:` — the 13 slash commands should appear in the command list.
 
 ### Update
 
@@ -186,6 +186,7 @@ All exposed as Claude Code skills under `/weave:*`.
 | `/weave:rollback` | Revert to previous step (files untouched). |
 | `/weave:debug` | Dump session + config + git state. |
 | `/weave:manage` | Edit / clone / delete / promote / demote presets. |
+| `/weave:edit-session` | Modify the **active** session — skip pending steps or insert new ones (session only, preset template untouched). |
 | `/weave:help` | Context-aware help. |
 
 ## File layout
@@ -197,7 +198,7 @@ All exposed as Claude Code skills under `/weave:*`.
 └── cache/                  ← internal markers
 
 ~/.claude/skills/
-└── weave-*/SKILL.md        ← 12 slash-command skills
+└── weave-*/SKILL.md        ← 13 slash-command skills
 
 <project>/.weave/
 ├── session.json            ← active session state

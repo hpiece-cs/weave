@@ -6,6 +6,23 @@ Weave is an agentic workflow composer for Claude Code. It discovers skills insta
 
 ---
 
+## Table of Contents
+
+1. [Install](#1-install)
+2. [Core concepts](#2-core-concepts)
+3. [Command reference](#3-command-reference)
+4. [End-to-end walkthrough](#4-end-to-end-walkthrough)
+5. [Scopes — project vs global](#5-scopes--project-vs-global)
+6. [Context compaction & session recovery](#6-context-compaction--session-recovery)
+7. [CLI (for scripting)](#7-cli-for-scripting)
+8. [Preset JSON shape](#8-preset-json-shape)
+9. [Troubleshooting](#9-troubleshooting)
+10. [Where things live](#10-where-things-live)
+11. [Stage taxonomy (compose grouping)](#11-stage-taxonomy-compose-grouping)
+12. [Badges reference](#12-badges-reference)
+
+---
+
 ## 1. Install
 
 From the weave repo:
@@ -16,7 +33,7 @@ node install.js
 
 Copies:
 - Runtime → `~/.weave/bin/` (or `$WEAVE_HOME/bin/`)
-- Skills → `~/.claude/skills/weave-*/` (12 commands)
+- Skills → `~/.claude/skills/weave-*/` (13 commands)
 
 Uninstall:
 
@@ -55,6 +72,7 @@ All commands are slash commands in Claude Code.
 | `/weave:rollback` | Revert current step to `pending`, previous step to `in_progress`. Files untouched. |
 | `/weave:debug` | Dump full session + config + git state. |
 | `/weave:manage` | Edit / clone / delete / promote / demote presets. |
+| `/weave:edit-session` | Modify the **active** session — skip pending steps or insert new ones. Touches `session.json` only; preset template stays intact. |
 | `/weave:help` | Adaptive help (step-level when active, command map otherwise). |
 
 ## 4. End-to-end walkthrough
@@ -68,7 +86,7 @@ All commands are slash commands in Claude Code.
 - A new terminal window pops up (Terminal.app / iTerm2 / gnome-terminal / etc. depending on OS).
 - The picker shows **all discovered skills grouped by 30 canonical phase stages** in project-time order (Onboarding → Alignment → Discovery → Research → Requirements → Design → Planning → Test Strategy → Implementation → Review → QA → CI/CD → User Testing → Ship → Retrospective → Milestone Close → Evolution), plus three cross-cutting bands (Control · Docs · Progress).
 - Within each group, skills are sorted by methodology priority (`wds → bmad → bmad-testarch → bmad-cis → gds → gsd → superpowers`), then curated step order, then alphabetically.
-- Navigate with arrow keys; `+`/`-` expand/collapse a phase group; `Space` toggles a skill; `a` toggles-all in the focused group; `s` jumps to the `SAVE` action.
+- Navigate with `Up`/`Down` (or `PageUp`/`PageDown` to jump 10 rows); `+`/`-` (or `Right`/`Left`) expand/collapse a phase group — `Left` on a skill row jumps back to its parent template; `Space` or `Enter` toggles a skill (or activates `SAVE`/`QUIT`); `a` toggles-all in the focused group; `r` reloads the skill list (ignores cache — useful after installing/removing plugins); `s` jumps to the `SAVE` action; `q` or `Ctrl+C` quits without saving.
 - `Enter` on `SAVE` → asks for preset name + scope (`project` default).
 - If name conflicts in that scope: choose `overwrite` / `rename` / `cancel`.
 - Window closes automatically; Claude Code shows `✓ Saved preset X`.
@@ -99,6 +117,7 @@ Claude starts a session and walks each step:
 | Leave context for later steps | `/weave:note consider auth middleware` |
 | Force-advance when stuck | `/weave:next` |
 | Undo last step | `/weave:rollback` |
+| Skip pending step / insert a new one | `/weave:edit-session` |
 | Inspect internals | `/weave:debug` |
 
 ### Autonomous mode
@@ -143,13 +162,34 @@ All commands route through `~/.weave/bin/cli.js`:
 ```bash
 node ~/.weave/bin/cli.js help
 node ~/.weave/bin/cli.js discover --workflow-only
+
+# storage
 node ~/.weave/bin/cli.js storage list-scopes
 node ~/.weave/bin/cli.js storage save my-flow '<json>' [--scope=project|global]
+node ~/.weave/bin/cli.js storage load my-flow [--scope=project|global]
+node ~/.weave/bin/cli.js storage remove my-flow [--scope=project|global]
+node ~/.weave/bin/cli.js storage clone <from> <to> [--from-scope=..] [--to-scope=..]
+
+# runtime — 18 subcommands total (status + 17 others)
 node ~/.weave/bin/cli.js runtime status
-# … and the 13 other runtime subcommands
+# also: start, end, advance, rollback, artifact-register, git-snapshot,
+#       history, debug, ref, note, restore, check-update, is-git-repo,
+#       session-outline, find-skill, insert-step, skip-step
+
+# step (used by /weave:run internally)
+node ~/.weave/bin/cli.js step prepare [--auto]            # guard + git-snapshot + wrapper
+node ~/.weave/bin/cli.js step finish '<artifacts-json>'   # register + advance + next wrapper
+
+# context-bridge / guard (low-level helpers)
+node ~/.weave/bin/cli.js context-bridge generate [stepIndex] [--auto]
+node ~/.weave/bin/cli.js guard <stepIndex> <sessionJsonPath>
+
+# compose (open / re-pick in a new terminal window)
+node ~/.weave/bin/cli.js compose-spawn
+node ~/.weave/bin/cli.js compose-pick [--session-checked=id1,id2,...]   # single-pick for /weave:edit-session
 ```
 
-Run `node ~/.weave/bin/cli.js help` for the full list.
+Run `node ~/.weave/bin/cli.js help` for the canonical usage string.
 
 ## 8. Preset JSON shape
 
@@ -201,7 +241,7 @@ Edit by hand anytime, or via `/weave:manage`.
 └── cache/                 ← internal markers
 
 ~/.claude/skills/
-└── weave-*/SKILL.md       ← 12 slash-command skills
+└── weave-*/SKILL.md       ← 13 slash-command skills
 
 <project>/.weave/
 ├── session.json           ← current session state
@@ -220,15 +260,9 @@ Onboarding · Alignment · Discovery · Research · Requirements — Mapping · 
 **Cross-cutting bands (3)**
 Control · Docs · Progress
 
-Classification pipeline (details in `docs/src-notes/core_scripts_discover.md`): `processStage` frontmatter → `OVERRIDE_TABLE` → `STAGE_KEYWORDS` → `'Other'`.
+Classification pipeline: `processStage` frontmatter → `OVERRIDE_TABLE` → `STAGE_KEYWORDS` → `'Other'`.
 
 ## 12. Badges reference
 
 The compose UI shows 2-3 letter badges next to each skill: `Q|I`, `W|M|I`, etc. Full reference: [badges.md](badges.md) / [badges.ko.md](badges.ko.md).
 
-## 13. Further reading
-
-- Design spec: `docs/superpowers/specs/2026-04-16-weave-workflow-composer-design.md`
-- Interface spec: `docs/superpowers/specs/2026-04-17-core-interface-spec.md`
-- Implementation plan: `docs/superpowers/plans/2026-04-17-weave-v1.md`
-- Core module notes: `docs/src-notes/`

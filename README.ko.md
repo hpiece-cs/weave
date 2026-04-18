@@ -91,7 +91,7 @@ Weave 의 설계 철학은 한 줄로 요약된다 — **"에이전트가 실행
 
 Weave 의 구성을 사용자 관점에서 단순화하면 이렇다:
 
-- **위 — 지시서 레이어.** 슬래시 커맨드(`/weave:compose`, `/weave:run`, …) 로 노출되는 스킬 12개. 에이전트가 읽고 실행한다.
+- **위 — 지시서 레이어.** 슬래시 커맨드(`/weave:compose`, `/weave:run`, …) 로 노출되는 스킬 13개. 에이전트가 읽고 실행한다.
 - **아래 — 상태 레이어.** preset, 세션, 산출물, 락. 전부 파일이고, 전부 사람이 읽을 수 있다.
 
 이 분리 덕분에 Weave 는 특정 에이전트 구현에 묶이지 않고, 모델 · CLI · 버전 업그레이드에 영향을 거의 받지 않는다.
@@ -131,13 +131,13 @@ node install.js
 복사 위치:
 
 - 런타임 → `~/.weave/bin/` (`$WEAVE_HOME` 로 오버라이드 가능)
-- 스킬 → `~/.claude/skills/weave-*/` (슬래시 커맨드 12개)
+- 스킬 → `~/.claude/skills/weave-*/` (슬래시 커맨드 13개)
 
 설치는 idempotent — 다시 실행해도 안전.
 
 ### 3. 확인
 
-Claude Code 에서 `/weave:` 를 입력하면 슬래시 커맨드 12개가 목록에 뜬다.
+Claude Code 에서 `/weave:` 를 입력하면 슬래시 커맨드 13개가 목록에 뜬다.
 
 ### 업데이트
 
@@ -186,6 +186,7 @@ rm -rf ~/.weave ~/.claude/skills/weave-*
 | `/weave:rollback` | 이전 step으로 되돌림 (파일은 건드리지 않음). |
 | `/weave:debug` | 세션 + 설정 + git 상태 덤프. |
 | `/weave:manage` | preset 편집 / 복제 / 삭제 / 프로모트 / 디모트. |
+| `/weave:edit-session` | **진행 중** 세션의 스텝 skip / 새 스킬 insert (세션만 수정, preset 원본은 유지). |
 | `/weave:help` | 상황 적응형 도움말. |
 
 ## 파일 위치
@@ -197,7 +198,7 @@ rm -rf ~/.weave ~/.claude/skills/weave-*
 └── cache/                  ← 내부 마커
 
 ~/.claude/skills/
-└── weave-*/SKILL.md        ← 슬래시 커맨드 스킬 12개
+└── weave-*/SKILL.md        ← 슬래시 커맨드 스킬 13개
 
 <project>/.weave/
 ├── session.json            ← 현재 세션 상태
