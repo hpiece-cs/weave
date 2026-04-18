@@ -12,6 +12,9 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "install-weave": "node install.js"
+    "test:watch": "node --watch --test tests/*.test.js",
+    "install-weave": "node install.js",
+    "sync:test": "node install-watch.js",
+    "watch:test": "node install-watch.js"
   }
 }

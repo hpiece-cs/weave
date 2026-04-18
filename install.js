@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // install.js — copy runtime to <weave-home>/bin/ and skills to <claude-skills>/weave-*/SKILL.md.
-// Honors $WEAVE_HOME override.
+// Honors $WEAVE_HOME override or command-line argument.
 // Run: node install.js   (or: npm run install-weave)
+//      node install.js /path/to/test/env
 
 'use strict';
 
@@ -11,7 +12,18 @@ const path = require('node:path');
 
 const REPO_ROOT = __dirname;
 const HOME = process.env.HOME || os.homedir();
-const WEAVE_HOME = process.env.WEAVE_HOME || path.join(HOME, '.weave');
+
+// Support three ways to specify WEAVE_HOME:
+// 1. Command-line argument: node install.js /custom/path
+// 2. Environment variable: WEAVE_HOME=/custom/path node install.js
+// 3. Default: ~/.weave
+let WEAVE_HOME = process.argv[2] || process.env.WEAVE_HOME || path.join(HOME, '.weave');
+
+// If argument is a relative path, resolve to absolute
+if (!path.isAbsolute(WEAVE_HOME)) {
+  WEAVE_HOME = path.resolve(process.cwd(), WEAVE_HOME);
+}
+
 const WEAVE_BIN = path.join(WEAVE_HOME, 'bin');
 const CLAUDE_SKILLS = path.join(HOME, '.claude', 'skills');
 
