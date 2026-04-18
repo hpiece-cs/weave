@@ -29,8 +29,10 @@ function usage() {
     '  guard <stepIndex> <sessionJsonPath>',
     '  context-bridge generate [stepIndex] [--auto]',
     '  runtime <start|end|advance|rollback|artifact-register|git-snapshot|',
-    '           status|history|debug|ref|note|restore|check-update|is-git-repo> [args...]',
+    '           status|history|debug|ref|note|restore|check-update|is-git-repo|',
+    '           session-outline|find-skill|insert-step|skip-step> [args...]',
     '  compose-spawn',
+    '  compose-pick [--session-checked=id1,id2,...]      (single-pick for edit-session)',
     '  step prepare [--auto]                                 (guard + git-snapshot + wrapper)',
     '  step finish <artifacts-json>                          (register + advance + next wrapper)',
     '  help',
@@ -132,6 +134,20 @@ function dispatchRuntime(args) {
       return runtime.checkUpdate();
     case 'is-git-repo':
       return { value: runtime.isGitRepo() };
+    // Edit-session family — /weave:edit-session 이 호출
+    case 'session-outline':
+      return runtime.sessionOutline();
+    case 'find-skill':
+      return runtime.findSkill(rest.join(' '));
+    case 'insert-step': {
+      const positional = rest.filter((a) => !a.startsWith('--'));
+      const afterFlag = rest.find((a) => a.startsWith('--after='));
+      const confirm = rest.includes('--confirm');
+      const after = afterFlag ? Number(afterFlag.slice('--after='.length)) : null;
+      return runtime.insertStep(positional[0], after, { confirm });
+    }
+    case 'skip-step':
+      return runtime.skipStep(rest[0]);
     default:
       throw new Error(`Unknown runtime subcommand: ${subcmd}`);
   }
@@ -239,6 +255,16 @@ function main() {
         const added = after.filter((n) => !before.includes(n));
         const removed = before.filter((n) => !after.includes(n));
         printJson({ ...result, added, removed });
+        return;
+      }
+      case 'compose-pick': {
+        // /weave:edit-session insert picker 용. 새 터미널 창에 compose-workflow 를
+        // --single-pick 모드로 띄우고, 고른 스킬 ID 를 반환한다.
+        // 옵션: --session-checked=id1,id2   (세션에 이미 있는 스킬 배지 표시)
+        const sessionChecked = extractFlag(args, '--session-checked=');
+        const ids = sessionChecked ? sessionChecked.split(',').filter(Boolean) : [];
+        const result = spawn.spawnComposePicker(ids);
+        printJson(result);
         return;
       }
       case 'step':

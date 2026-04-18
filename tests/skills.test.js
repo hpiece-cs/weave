@@ -37,9 +37,10 @@ const EXPECTED_SKILLS = [
   { name: 'next', description: /next|advance/i, contains: ['runtime advance'] },
   { name: 'rollback', description: /rollback|previous/i, contains: ['runtime rollback'] },
   { name: 'ref', description: /ref|search|artifact/i, contains: ['runtime ref'] },
+  { name: 'edit-session', description: /edit|session|insert|skip/i, contains: ['runtime session-outline', 'runtime skip-step', 'runtime insert-step', 'compose-pick'] },
 ];
 
-test('all 12 expected skills exist', () => {
+test('all expected skills exist', () => {
   const present = fs.readdirSync(SKILLS_DIR).filter((n) =>
     fs.existsSync(path.join(SKILLS_DIR, n, 'SKILL.md'))
   );

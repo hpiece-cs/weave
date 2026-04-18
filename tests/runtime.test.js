@@ -321,3 +321,181 @@ test('isGitRepo detects .git presence', () => {
     fs.rmSync(gitProj, { recursive: true, force: true });
   }
 });
+
+// ── Edit session ────────────────────────────────────
+
+test('sessionOutline returns steps with editable flags', () => {
+  makePreset('flow-outline');
+  runtime.start('flow-outline');
+  const out = runtime.sessionOutline();
+  assert.strictEqual(out.workflowName, 'flow-outline');
+  assert.strictEqual(out.currentStep, 0);
+  assert.strictEqual(out.totalSteps, 3);
+  // step 0 = in_progress (current), not editable
+  assert.strictEqual(out.steps[0].status, 'in_progress');
+  assert.strictEqual(out.steps[0].editable, false);
+  // step 1, 2 = pending and after currentStep → editable
+  assert.strictEqual(out.steps[1].editable, true);
+  assert.strictEqual(out.steps[2].editable, true);
+  // phase info propagated
+  assert.strictEqual(out.steps[0].phase, 'Discovery');
+  assert.ok(Number.isInteger(out.steps[0].stageIndex));
+});
+
+test('skipStep marks pending step as skipped', () => {
+  makePreset('flow-skip');
+  runtime.start('flow-skip');
+  const result = runtime.skipStep(3);
+  assert.strictEqual(result.status, 'ok');
+  assert.strictEqual(result.skipped, 3);
+  const session = runtime.loadSession();
+  assert.strictEqual(session.steps[2].status, 'skipped');
+  assert.ok(session.steps[2].skippedAt);
+});
+
+test('skipStep rejects in_progress step', () => {
+  makePreset('flow-skip-current');
+  runtime.start('flow-skip-current');
+  const result = runtime.skipStep(1);
+  assert.strictEqual(result.status, 'error');
+  assert.strictEqual(result.reason, 'in-progress');
+});
+
+test('skipStep rejects completed step', () => {
+  makePreset('flow-skip-done');
+  runtime.start('flow-skip-done');
+  runtime.advance();
+  const result = runtime.skipStep(1);
+  assert.strictEqual(result.status, 'error');
+  assert.strictEqual(result.reason, 'already-completed');
+});
+
+test('skipStep rejects out-of-range', () => {
+  makePreset('flow-skip-oor');
+  runtime.start('flow-skip-oor');
+  assert.strictEqual(runtime.skipStep(99).reason, 'out-of-range');
+  assert.strictEqual(runtime.skipStep(0).reason, 'out-of-range');
+});
+
+test('skipStep rejects already-skipped step', () => {
+  makePreset('flow-skip-twice');
+  runtime.start('flow-skip-twice');
+  runtime.skipStep(3);
+  const result = runtime.skipStep(3);
+  assert.strictEqual(result.status, 'error');
+  assert.strictEqual(result.reason, 'already-skipped');
+});
+
+test('findSkill returns exact match when ID matches', () => {
+  const result = runtime.findSkill('superpowers:brainstorming');
+  assert.ok(result.exact);
+  assert.strictEqual(result.exact.id, 'superpowers:brainstorming');
+  assert.strictEqual(result.suggestions.length, 0);
+});
+
+test('findSkill returns suggestions for partial input', () => {
+  const result = runtime.findSkill('brainstorm');
+  assert.strictEqual(result.exact, null);
+  assert.ok(result.suggestions.length > 0);
+  assert.ok(result.suggestions.some((s) => s.id.includes('brainstorm')));
+});
+
+test('findSkill returns empty when nothing matches', () => {
+  const result = runtime.findSkill('zzzzzzzz-unlikely-needle');
+  assert.strictEqual(result.exact, null);
+  assert.strictEqual(result.suggestions.length, 0);
+});
+
+test('insertStep splices new step after given index', () => {
+  makePreset('flow-ins');
+  runtime.start('flow-ins');
+  // Insert a forward-phase skill (systematic-debugging, stage 27) after step 2 (stage 15)
+  const result = runtime.insertStep('superpowers:systematic-debugging', 2);
+  assert.strictEqual(result.status, 'ok');
+  assert.strictEqual(result.insertedAt, 3);
+  const session = runtime.loadSession();
+  assert.strictEqual(session.steps.length, 4);
+  assert.strictEqual(session.steps[3].skillId, 'superpowers:systematic-debugging');
+  assert.strictEqual(session.steps[3].status, 'pending');
+  assert.ok(session.steps[3].insertedAt);
+});
+
+test('insertStep returns skill-not-found with suggestions', () => {
+  makePreset('flow-ins-404');
+  runtime.start('flow-ins-404');
+  const result = runtime.insertStep('superpowers:brainstorm', 1);
+  assert.strictEqual(result.status, 'error');
+  assert.strictEqual(result.reason, 'skill-not-found');
+  assert.ok(Array.isArray(result.suggestions));
+  assert.ok(result.suggestions.some((s) => s.id === 'superpowers:brainstorming'));
+});
+
+test('insertStep rejects insertion before current step', () => {
+  makePreset('flow-ins-past');
+  runtime.start('flow-ins-past');
+  runtime.advance(); // currentStep = 1
+  const result = runtime.insertStep('superpowers:test-driven-development', 0);
+  assert.strictEqual(result.status, 'error');
+  assert.strictEqual(result.reason, 'invalid-position');
+});
+
+test('insertStep gates phase-backward insert behind confirm', () => {
+  makePreset('flow-ins-back');
+  runtime.start('flow-ins-back');
+  // Insert Discovery (stage 2) after Implementation — Dev (stage 15) → backward.
+  const result = runtime.insertStep('superpowers:brainstorming', 2);
+  assert.strictEqual(result.status, 'needs-confirm');
+  assert.strictEqual(result.reason, 'phase-backward');
+  assert.strictEqual(result.detail.targetPhase, 'Discovery');
+  assert.strictEqual(result.detail.anchorPhase, 'Implementation — Dev');
+  // Session should NOT have been mutated.
+  assert.strictEqual(runtime.loadSession().steps.length, 3);
+});
+
+test('insertStep with --confirm bypasses phase-backward gate', () => {
+  makePreset('flow-ins-back-ok');
+  runtime.start('flow-ins-back-ok');
+  const result = runtime.insertStep('superpowers:brainstorming', 2, { confirm: true });
+  assert.strictEqual(result.status, 'ok');
+  const session = runtime.loadSession();
+  assert.strictEqual(session.steps.length, 4);
+  assert.strictEqual(session.steps[3].skillId, 'superpowers:brainstorming');
+});
+
+test('advance hops over skipped steps', () => {
+  makePreset('flow-adv-skip');
+  runtime.start('flow-adv-skip');
+  runtime.skipStep(2); // mark step 2 (idx 1) as skipped
+  const result = runtime.advance();
+  // From step 0 → should land on step 2 (idx 2), skipping idx 1.
+  assert.strictEqual(result.done, false);
+  assert.strictEqual(result.completed, 'superpowers:brainstorming');
+  assert.strictEqual(result.next, 'superpowers:executing-plans');
+  const session = runtime.loadSession();
+  assert.strictEqual(session.currentStep, 2);
+  assert.strictEqual(session.steps[1].status, 'skipped');
+  assert.strictEqual(session.steps[2].status, 'in_progress');
+});
+
+test('advance marks done when all remaining are skipped', () => {
+  makePreset('flow-adv-all-skip');
+  runtime.start('flow-adv-all-skip');
+  runtime.skipStep(2);
+  runtime.skipStep(3);
+  const result = runtime.advance();
+  assert.strictEqual(result.done, true);
+  assert.strictEqual(result.next, null);
+});
+
+test('rollback hops over skipped steps', () => {
+  makePreset('flow-rb-skip');
+  runtime.start('flow-rb-skip');
+  runtime.skipStep(2);
+  runtime.advance(); // step 0 → step 2 (hopping idx 1)
+  const result = runtime.rollback();
+  // Should go from idx 2 back to idx 0 (skipping idx 1).
+  assert.strictEqual(result.rolledBackTo, 0);
+  const session = runtime.loadSession();
+  assert.strictEqual(session.currentStep, 0);
+  assert.strictEqual(session.steps[1].status, 'skipped');
+});

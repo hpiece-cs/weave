@@ -55,8 +55,15 @@ function appleScriptRun(script) {
   return spawnSync('osascript', ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-function spawnMac(demo, marker) {
-  const shellCmd = `clear; node ${JSON.stringify(demo)}; printf '' > ${JSON.stringify(marker)}; exit`;
+function buildShellCmd(demo, marker, extraArgs = []) {
+  // stdout 은 TUI 렌더 전용이라 redirect 하지 않는다. --single-pick 모드는
+  // compose-workflow.js 내부에서 --result-file 로 지정된 경로에 결과를 쓴다.
+  const argStr = extraArgs.map((a) => JSON.stringify(a)).join(' ');
+  return `clear; node ${JSON.stringify(demo)} ${argStr}; printf '' > ${JSON.stringify(marker)}; exit`;
+}
+
+function spawnMac(demo, marker, extraArgs = []) {
+  const shellCmd = buildShellCmd(demo, marker, extraArgs);
   const termProgram = process.env.TERM_PROGRAM || '';
 
   // Prefer the user's current terminal if it's iTerm2 and scriptable.
@@ -113,8 +120,9 @@ function closeItermWindow() {
 
 // ── Linux ──────────────────────────────────────────────────────────
 
-function spawnLinux(demo, marker) {
-  const inner = `node ${JSON.stringify(demo)}; printf '' > ${JSON.stringify(marker)}; exit`;
+function spawnLinux(demo, marker, extraArgs = []) {
+  const argStr = extraArgs.map((a) => JSON.stringify(a)).join(' ');
+  const inner = `node ${JSON.stringify(demo)} ${argStr}; printf '' > ${JSON.stringify(marker)}; exit`;
   const candidates = [
     ['gnome-terminal', ['--', 'bash', '-c', inner]],
     ['konsole', ['--separate', '-e', 'bash', '-c', inner]],
@@ -138,9 +146,10 @@ function spawnLinux(demo, marker) {
 
 // ── Windows ────────────────────────────────────────────────────────
 
-function spawnWindows(demo, marker) {
+function spawnWindows(demo, marker, extraArgs = []) {
   // `start "title" cmd /c "node demo & type nul > marker & exit"` opens a new window.
-  const inner = `node "${demo}" & type nul > "${marker}" & exit`;
+  const argStr = extraArgs.map((a) => `"${a}"`).join(' ');
+  const inner = `node "${demo}" ${argStr} & type nul > "${marker}" & exit`;
   try {
     const child = spawnChild('cmd', ['/c', 'start', '"weave:compose"', 'cmd', '/c', inner], {
       detached: true,
@@ -159,13 +168,14 @@ function spawnWindows(demo, marker) {
 function spawnCompose(options = {}) {
   const demo = options.demo || demoPath();
   const marker = options.marker || makeMarkerPath();
+  const extraArgs = options.args || [];
   if (fs.existsSync(marker)) fs.unlinkSync(marker);
 
   const platform = os.platform();
   let result;
-  if (platform === 'darwin') result = spawnMac(demo, marker);
-  else if (platform === 'linux') result = spawnLinux(demo, marker);
-  else if (platform === 'win32') result = spawnWindows(demo, marker);
+  if (platform === 'darwin') result = spawnMac(demo, marker, extraArgs);
+  else if (platform === 'linux') result = spawnLinux(demo, marker, extraArgs);
+  else if (platform === 'win32') result = spawnWindows(demo, marker, extraArgs);
   else result = { spawned: false, reason: `unsupported platform: ${platform}` };
 
   if (!result.spawned) {
@@ -188,8 +198,46 @@ function spawnCompose(options = {}) {
   return { success: true, terminal: result.kind };
 }
 
+// edit-session insert picker 전용 헬퍼. compose-workflow 를 --single-pick 모드로
+// 새 창에 띄우고, 사용자가 고른 스킬 ID 를 돌려준다.
+// sessionCheckedIds: 현재 세션에 이미 있는 스킬 ID 들 (배지 표시용).
+//
+// 주의: 새 창에선 stdout 을 TUI 가 쓰고 있어 shell redirect(>) 로 가로챌 수
+// 없다. 대신 --result-file=<path> 플래그로 compose-workflow 에게 결과 JSON 을
+// 쓸 파일 경로를 넘기고, spawn 이 끝나면 그 파일을 읽는다.
+function spawnComposePicker(sessionCheckedIds = []) {
+  fs.mkdirSync(paths.CACHE_DIR, { recursive: true });
+  const resultPath = path.join(paths.CACHE_DIR, `pick-${Date.now()}-${process.pid}.json`);
+  if (fs.existsSync(resultPath)) fs.unlinkSync(resultPath);
+  const args = ['--single-pick', `--result-file=${resultPath}`];
+  if (sessionCheckedIds.length > 0) {
+    args.push(`--session-checked=${sessionCheckedIds.join(',')}`);
+  }
+  const result = spawnCompose({ args });
+  if (!result.success) {
+    if (fs.existsSync(resultPath)) fs.unlinkSync(resultPath);
+    return { success: false, reason: result.reason, skillId: null };
+  }
+  let skillId = null;
+  try {
+    if (fs.existsSync(resultPath)) {
+      const raw = fs.readFileSync(resultPath, 'utf8').trim();
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        skillId = parsed.skillId || null;
+      }
+    }
+  } catch {
+    // Malformed output — treat as canceled.
+  } finally {
+    if (fs.existsSync(resultPath)) fs.unlinkSync(resultPath);
+  }
+  return { success: true, skillId, terminal: result.terminal };
+}
+
 module.exports = {
   spawnCompose,
+  spawnComposePicker,
   demoPath,
   makeMarkerPath,
   waitForMarker,

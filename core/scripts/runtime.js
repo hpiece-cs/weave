@@ -185,7 +185,12 @@ function advance() {
   const current = session.steps[session.currentStep];
   current.status = 'completed';
   current.completedAt = nowIso();
-  const nextIdx = session.currentStep + 1;
+  // 'skipped' 로 표시된 뒤 스텝은 건너뛰어 다음 pending 을 찾는다
+  // (사용자가 /weave:edit-session skip 으로 표시한 스텝).
+  let nextIdx = session.currentStep + 1;
+  while (nextIdx < session.steps.length && session.steps[nextIdx].status === 'skipped') {
+    nextIdx++;
+  }
   const isDone = nextIdx >= session.steps.length;
   if (!isDone) {
     session.currentStep = nextIdx;
@@ -205,13 +210,18 @@ function advance() {
 
 function rollback() {
   const session = requireSession();
-  if (session.currentStep === 0) throw new Error('Cannot rollback: already at first step');
+  // 이전 non-skipped 스텝 찾기 (edit-session 으로 건너뛴 스텝은 rollback 대상이 아님).
+  let prevIdx = session.currentStep - 1;
+  while (prevIdx >= 0 && session.steps[prevIdx].status === 'skipped') {
+    prevIdx--;
+  }
+  if (prevIdx < 0) throw new Error('Cannot rollback: already at first step');
   const current = session.steps[session.currentStep];
   current.status = 'pending';
   current.outputs = [];
   current.startedAt = null;
-  session.currentStep -= 1;
-  const prev = session.steps[session.currentStep];
+  session.currentStep = prevIdx;
+  const prev = session.steps[prevIdx];
   prev.status = 'in_progress';
   prev.completedAt = null;
   saveSession(session);
@@ -220,6 +230,172 @@ function rollback() {
     skillId: prev.skillId,
     warning: '파일 변경은 유지됩니다. 필요시 git으로 직접 되돌리세요.',
   };
+}
+
+// ── Edit session ────────────────────────────────────
+// /weave:edit-session 이 쓰는 헬퍼들. 진행 중 세션만 수정하고, 완료/진행 중 스텝은
+// 읽기 전용. 원본 preset JSON 은 건드리지 않는다 (session.json 만 편집).
+
+function sessionOutline() {
+  const session = requireSession();
+  const all = discover.discoverAll({ workflowOnly: false });
+  const byId = new Map(all.map((s) => [s.id, s]));
+  const cur = session.currentStep;
+  return {
+    workflowName: session.workflowName,
+    sessionId: session.sessionId,
+    currentStep: cur,
+    totalSteps: session.steps.length,
+    steps: session.steps.map((step, idx) => {
+      const meta = byId.get(step.skillId);
+      return {
+        index: idx,
+        number: idx + 1,
+        skillId: step.skillId,
+        checkpoint: step.checkpoint || 'auto',
+        interactive: Boolean(step.interactive),
+        status: step.status,
+        phase: meta ? meta.phase : null,
+        stageIndex: meta ? meta.stageIndex : null,
+        // pending 이면서 현재 스텝보다 뒤에 있는 스텝만 편집 가능.
+        editable: step.status === 'pending' && idx > cur,
+      };
+    }),
+  };
+}
+
+function findSkill(query) {
+  const q = String(query || '').trim();
+  if (!q) return { exact: null, suggestions: [] };
+  const all = discover.discoverAll({ workflowOnly: false });
+  const exact = all.find((s) => s.id === q) || null;
+  if (exact) return { exact, suggestions: [] };
+  const needle = q.toLowerCase();
+  // id 부분 매치를 우선순위 높게, name/description 매치를 그 뒤로.
+  const scored = all
+    .map((s) => {
+      const id = s.id.toLowerCase();
+      const name = (s.name || '').toLowerCase();
+      const desc = (s.description || '').toLowerCase();
+      let score = 0;
+      if (id === needle) score += 100;
+      else if (id.startsWith(needle)) score += 80;
+      else if (id.includes(needle)) score += 50;
+      if (name === needle) score += 60;
+      else if (name.startsWith(needle)) score += 40;
+      else if (name.includes(needle)) score += 20;
+      if (desc.includes(needle)) score += 5;
+      return { skill: s, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+    .map((x) => x.skill);
+  return { exact: null, suggestions: scored };
+}
+
+function validatePhaseOrder(skillId, afterIdx, session) {
+  const all = discover.discoverAll({ workflowOnly: false });
+  const byId = new Map(all.map((s) => [s.id, s]));
+  const target = byId.get(skillId);
+  if (!target || target.stageIndex == null) return { ok: true };
+  // 삽입 위치 직전(afterIdx) 스텝의 phase 와 비교. 그 스텝이 타겟보다 뒤 phase 면
+  // 사실상 "이미 뒤쪽 공정으로 넘어갔는데 앞 공정을 끼워넣는" 역주행.
+  const anchor = session.steps[afterIdx];
+  if (!anchor) return { ok: true };
+  const anchorMeta = byId.get(anchor.skillId);
+  if (!anchorMeta || anchorMeta.stageIndex == null) return { ok: true };
+  if (target.stageIndex < anchorMeta.stageIndex) {
+    return {
+      ok: false,
+      issue: 'phase-backward',
+      targetPhase: target.phase,
+      targetStageIndex: target.stageIndex,
+      anchorPhase: anchorMeta.phase,
+      anchorStageIndex: anchorMeta.stageIndex,
+    };
+  }
+  return { ok: true };
+}
+
+function insertStep(skillId, afterIdxInput, options = {}) {
+  const session = requireSession();
+  // 1) 스킬 존재 확인
+  const match = findSkill(skillId);
+  if (!match.exact) {
+    return {
+      status: 'error',
+      reason: 'skill-not-found',
+      skillId,
+      suggestions: match.suggestions.map((s) => ({ id: s.id, name: s.name, phase: s.phase })),
+    };
+  }
+  const skill = match.exact;
+  // 2) 위치 유효성. 기본값: 현재 스텝 바로 뒤.
+  const afterIdx = afterIdxInput == null ? session.currentStep : Number(afterIdxInput);
+  if (!Number.isInteger(afterIdx) || afterIdx < 0 || afterIdx >= session.steps.length) {
+    return { status: 'error', reason: 'invalid-position', afterIdx, totalSteps: session.steps.length };
+  }
+  if (afterIdx < session.currentStep) {
+    return {
+      status: 'error',
+      reason: 'invalid-position',
+      detail: '완료/진행 중 스텝 앞에는 삽입할 수 없습니다.',
+      afterIdx,
+      currentStep: session.currentStep,
+    };
+  }
+  // 3) Phase 역주행 검증 (confirm 되지 않았으면 게이트)
+  const phaseCheck = validatePhaseOrder(skillId, afterIdx, session);
+  if (!phaseCheck.ok && !options.confirm) {
+    return {
+      status: 'needs-confirm',
+      reason: phaseCheck.issue,
+      detail: {
+        targetPhase: phaseCheck.targetPhase,
+        targetStageIndex: phaseCheck.targetStageIndex,
+        anchorPhase: phaseCheck.anchorPhase,
+        anchorStageIndex: phaseCheck.anchorStageIndex,
+        afterIdx,
+      },
+    };
+  }
+  // 4) 삽입
+  const newStep = {
+    skillId: skill.id,
+    skillPath: skill.path,
+    checkpoint: skill.defaultCheckpoint || 'auto',
+    interactive: Boolean(skill.interactive),
+    status: 'pending',
+    startedAt: null,
+    outputs: [],
+    insertedAt: nowIso(),
+  };
+  session.steps.splice(afterIdx + 1, 0, newStep);
+  saveSession(session);
+  return {
+    status: 'ok',
+    insertedAt: afterIdx + 1,
+    skillId: skill.id,
+    newTotalSteps: session.steps.length,
+  };
+}
+
+function skipStep(stepNumberInput) {
+  const session = requireSession();
+  const n = Number(stepNumberInput);
+  if (!Number.isInteger(n) || n < 1 || n > session.steps.length) {
+    return { status: 'error', reason: 'out-of-range', stepNumber: stepNumberInput, totalSteps: session.steps.length };
+  }
+  const idx = n - 1;
+  const step = session.steps[idx];
+  if (step.status === 'completed') return { status: 'error', reason: 'already-completed', stepNumber: n };
+  if (step.status === 'in_progress') return { status: 'error', reason: 'in-progress', stepNumber: n };
+  if (step.status === 'skipped') return { status: 'error', reason: 'already-skipped', stepNumber: n };
+  step.status = 'skipped';
+  step.skippedAt = nowIso();
+  saveSession(session);
+  return { status: 'ok', skipped: n, skillId: step.skillId };
 }
 
 function normalizeReported(input) {
@@ -453,6 +629,11 @@ module.exports = {
   restore,
   checkUpdate,
   isGitRepo,
+  // Edit session (진행 중 세션 편집)
+  sessionOutline,
+  findSkill,
+  insertStep,
+  skipStep,
 };
 
 if (require.main === module) {
@@ -472,6 +653,18 @@ if (require.main === module) {
     restore: () => restore(),
     'check-update': () => checkUpdate(),
     'is-git-repo': () => ({ value: isGitRepo() }),
+    // Edit session subcommands
+    'session-outline': () => sessionOutline(),
+    'find-skill': () => findSkill(rest.join(' ')),
+    'insert-step': () => {
+      // Usage: insert-step <skillId> [--after=N] [--confirm]
+      const positional = rest.filter((a) => !a.startsWith('--'));
+      const afterFlag = rest.find((a) => a.startsWith('--after='));
+      const confirm = rest.includes('--confirm');
+      const after = afterFlag ? Number(afterFlag.slice('--after='.length)) : null;
+      return insertStep(positional[0], after, { confirm });
+    },
+    'skip-step': () => skipStep(rest[0]),
   };
   const handler = handlers[command];
   if (!handler) {
