@@ -66,11 +66,14 @@ rm -rf ~/.weave ~/.claude/skills/weave-*
 ```
 
 - 새 터미널 창이 뜸 (OS에 따라 Terminal.app / iTerm2 / gnome-terminal 등).
-- 상단 탭: `[ Main ]` (큐레이션된 템플릿) / `[ All ]` (소스별 전체 보기). `Tab`으로 전환.
-- 방향키로 네비게이션, `+`/`-`로 템플릿 펼침/접음, `Space`로 체크, `a`로 템플릿 전체 토글.
-- `SAVE`에서 `Enter` → preset 이름 + scope 입력 (기본 `project`).
-- 같은 scope에 이름 충돌 시: `overwrite` / `rename` / `cancel` 선택.
-- 창 자동 종료 → Claude Code에 `✓ Saved preset X` 표시.
+- 픽커는 **디스커버된 모든 스킬을 프로젝트 생애주기 순서의 30개 canonical phase 그룹**으로 묶어 한 화면에 표시 (Onboarding → Alignment → Discovery → Research → Requirements 3종 → Design 4종 → Planning 3종 → Test Strategy → Implementation 2종 → Code Review → QA 계열 → CI/CD → User Testing → Integration & Ship → Retrospective → Milestone Close → Evolution) + 교차횡단 밴드 3종 (Control · Docs · Progress).
+- 각 그룹 내부는 방법론 우선순위 (`wds → bmad → bmad-testarch → bmad-cis → gds → gsd → superpowers`) → curated step 순서 → 알파벳 순으로 정렬.
+- 방향키로 네비게이션, `+`/`-` 로 phase 그룹 펼침/접음, `Space` 로 스킬 체크, `a` 로 현재 그룹 전체 토글, `s` 로 `SAVE` 액션에 점프.
+- `SAVE` 에서 `Enter` → preset 이름 + scope 입력 (기본 `project`).
+- 같은 scope 에 이름 충돌 시: `overwrite` / `rename` / `cancel` 선택.
+- 창 자동 종료 → Claude Code 에 `✓ Saved preset X` 표시.
+
+**로케일**. 픽커, 상태 메시지, 프롬프트, phase 설명은 `$LANG` 을 따름 — 한국어(`ko_*`) 또는 영어(기본). 로케일이 바뀌면 캐시가 자동 무효화되어 다음 실행에서 올바른 언어로 다시 렌더링됨.
 
 ### 실행
 
@@ -206,11 +209,23 @@ node ~/.weave/bin/cli.js runtime status
 └── archive/               ← 완료된 세션
 ```
 
-## 11. 뱃지 레퍼런스
+## 11. Stage 분류 체계 (compose 그룹 기준)
+
+Weave 의 discover 레이어는 모든 에이전틱 워크플로우 스킬을 **30개 canonical stage** 중 하나로 분류한다. compose 픽커의 그룹 축과 `discoverAll` 결과의 정렬 기준.
+
+**메인 흐름 (project-time, 27개)**
+Onboarding · Alignment · Discovery · Research · Requirements — Mapping · Requirements — Spec · Requirements — Validation · Design — UX · Design — Architecture · Design — Narrative/Content · Design — Asset Spec · Planning — Epics · Planning — Stories · Planning — Sprint · Test Strategy · Implementation — Dev · Implementation — Assets · Code Review · Test — Automation · QA — NFR · QA — Review/Trace · CI/CD · User Testing · Integration & Ship · Retrospective · Milestone Close · Evolution
+
+**교차횡단 밴드 (3개)**
+Control · Docs · Progress
+
+분류 파이프라인 (상세: `docs/src-notes/core_scripts_discover.md`): `processStage` frontmatter → `OVERRIDE_TABLE` → `STAGE_KEYWORDS` → `'Other'`.
+
+## 12. 뱃지 레퍼런스
 
 compose UI는 각 스킬 옆에 2–3글자 뱃지를 표시함: `Q|I`, `W|M|I` 등. 전체 설명: [badges.ko.md](badges.ko.md) / [badges.md](badges.md).
 
-## 12. 더 읽을거리
+## 13. 더 읽을거리
 
 - 디자인 스펙: `docs/superpowers/specs/2026-04-16-weave-workflow-composer-design.md`
 - 인터페이스 스펙: `docs/superpowers/specs/2026-04-17-core-interface-spec.md`

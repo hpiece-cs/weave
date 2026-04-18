@@ -66,11 +66,14 @@ All commands are slash commands in Claude Code.
 ```
 
 - A new terminal window pops up (Terminal.app / iTerm2 / gnome-terminal / etc. depending on OS).
-- Top tabs: `[ Main ]` (curated templates) / `[ All ]` (per-source browse). `Tab` switches.
-- Navigate with arrow keys; `+`/`-` expand/collapse template; `Space` toggles selection; `a` toggles-all in a template.
+- The picker shows **all discovered skills grouped by 30 canonical phase stages** in project-time order (Onboarding → Alignment → Discovery → Research → Requirements → Design → Planning → Test Strategy → Implementation → Review → QA → CI/CD → User Testing → Ship → Retrospective → Milestone Close → Evolution), plus three cross-cutting bands (Control · Docs · Progress).
+- Within each group, skills are sorted by methodology priority (`wds → bmad → bmad-testarch → bmad-cis → gds → gsd → superpowers`), then curated step order, then alphabetically.
+- Navigate with arrow keys; `+`/`-` expand/collapse a phase group; `Space` toggles a skill; `a` toggles-all in the focused group; `s` jumps to the `SAVE` action.
 - `Enter` on `SAVE` → asks for preset name + scope (`project` default).
 - If name conflicts in that scope: choose `overwrite` / `rename` / `cancel`.
 - Window closes automatically; Claude Code shows `✓ Saved preset X`.
+
+**Locale.** The picker, status messages, prompts, and phase descriptions follow `$LANG` — Korean (`ko_*`) or English (default). The cache invalidates automatically when the locale changes, so switching terminals between languages always shows the right strings.
 
 ### Run it
 
@@ -207,11 +210,23 @@ Edit by hand anytime, or via `/weave:manage`.
 └── archive/               ← completed sessions
 ```
 
-## 11. Badges reference
+## 11. Stage taxonomy (compose grouping)
+
+Weave's discover layer classifies every Agentic Workflow skill into one of 30 canonical stages used for grouping in the compose picker and for intra-stage sorting in `discoverAll` output:
+
+**Main flow (project-time, 27)**
+Onboarding · Alignment · Discovery · Research · Requirements — Mapping · Requirements — Spec · Requirements — Validation · Design — UX · Design — Architecture · Design — Narrative/Content · Design — Asset Spec · Planning — Epics · Planning — Stories · Planning — Sprint · Test Strategy · Implementation — Dev · Implementation — Assets · Code Review · Test — Automation · QA — NFR · QA — Review/Trace · CI/CD · User Testing · Integration & Ship · Retrospective · Milestone Close · Evolution
+
+**Cross-cutting bands (3)**
+Control · Docs · Progress
+
+Classification pipeline (details in `docs/src-notes/core_scripts_discover.md`): `processStage` frontmatter → `OVERRIDE_TABLE` → `STAGE_KEYWORDS` → `'Other'`.
+
+## 12. Badges reference
 
 The compose UI shows 2-3 letter badges next to each skill: `Q|I`, `W|M|I`, etc. Full reference: [badges.md](badges.md) / [badges.ko.md](badges.ko.md).
 
-## 12. Further reading
+## 13. Further reading
 
 - Design spec: `docs/superpowers/specs/2026-04-16-weave-workflow-composer-design.md`
 - Interface spec: `docs/superpowers/specs/2026-04-17-core-interface-spec.md`
