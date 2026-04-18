@@ -6,7 +6,11 @@ const path = require('node:path');
 const { CACHE_DIR } = require('./paths.js');
 const discover = require('./discover.js');
 
-const CACHE_SCHEMA_VERSION = 1;
+// Bump when the shape or filtering rules of cached groups change — this
+// forces old caches to be discarded on the next run.
+//   v1 → v2: compose-workflow.js 가 'Other' phase 를 그룹 목록에서 제외하고,
+//             각 그룹에 maxSrcWidth 필드를 추가했음.
+const CACHE_SCHEMA_VERSION = 2;
 const CACHE_FILE = path.join(CACHE_DIR, 'skill-groups.json');
 
 function computeFingerprints() {
