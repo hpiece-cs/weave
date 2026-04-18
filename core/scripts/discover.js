@@ -37,18 +37,6 @@ const COMPACTION_RE = /\b(stepsCompleted|STATE\.md|HANDOFF\.json|compaction|resu
 const INTERACTIVE_RE = /\b(asks?|prompts?)\s+(the\s+)?user\b|\binteractive\b|\buser\s+(selects?|chooses?|decides?|inputs?|decisions?|choice)\b/i;
 const VERIFY_RE = /\breview\b|\btest\b|\bverif|\baudit\b|\bqa\b/i;
 
-// ── Phase keywords (check Implementation/Review first due to overlapping words) ──
-const PHASE_KEYWORDS = [
-  ['Implementation', /\btest-driven|\btdd\b|\bdev-story\b|\bquick-dev(?:-new-preview)?\b|\bexecute-phase\b|\bautonomous\b|\bexecuting-plans\b|\bsubagent-driven\b|\bimplement\w*|\bnew-milestone\b|\binsert-phase\b|\bquick-spec\b|\bexecut\w*/],
-  ['Review/QA',      /\bcode-review\b|\breview-[a-z]+\b|\bverify\b|\bverification\b|\bvalidate\w*|\baudit\w*|\bqa\b|\batdd\b|\btest-design\b|\btest-review\b|\btest-automate\b|\bautomate\w*|\btrace\b|\bci\b|\be2e\b|\bui-review\b|\brequesting-code-review\b|\breceiving-code-review\b|\badd-tests\b|\bperformance-test\b|\bplaytest\b/],
-  ['Discovery',      /\bbrainstorm\w*|\bresearch\w*|\bdiscover\w*|\bmarket-research\b|\btechnical-research\b|\bdomain-research\b|\belicitation\b/],
-  ['Requirements',   /\bprd\b|\bspec\b|\bbrief\b|\brequirement\w*|\bvalidate-prd\b|\bcheck-implementation-readiness\b|\bproduct-brief\b/],
-  ['Design',         /\barchitect\w*|\bgdd\b|\bnarrative|\bdesign-system\b|\bux\b|\bui-phase\b|\bdesign-thinking\b|\bscenarios\b|\binnovation-strategy\b|\bstorytelling\b/],
-  ['Planning',       /\bepic\b|\bstor(?:y|ies)\b|\bsprint-planning\b|\bplan-phase\b|\bplan-milestone-gaps\b|\broadmap\b|\bcreate-story\b|\bwriting-plans\b|\bdiscuss-phase\b|\bsprint-status\b/],
-  ['Completion',     /\bretrospective\b|\bcomplete-milestone\b|\barchive\w*|\bmilestone-summary\b|\bfinishing-a-development-branch\b|\bship\b/],
-  ['Control',        /\bcorrect-course\b|\bpause-work\b|\bresume-work\b|\brollback\b|\bdebug\w*|\bforensics\b|\bmanager\b|\bhealth\b|\bcleanup\b|\brestore\b|\bsession-report\b/],
-];
-
 // ── Extraction patterns ──
 const USAGE_TRIGGER_RE = /Use\s+when[^.]*(?:\.|$)/i;
 const OUTPUT_BODY_PATTERNS = [
@@ -111,32 +99,298 @@ function parseSkillMd(content, filePath) {
   const body = m[2];
   const nameM = fm.match(/^name:\s*(.+)$/m);
   const descM = fm.match(/^description:\s*(.+)$/m);
+  const processStageM = fm.match(/^processStage:\s*(.+)$/m);
+  const processOrderM = fm.match(/^processOrder:\s*(.+)$/m);
+  const lifecycleOrderM = fm.match(/^lifecycleOrder:\s*(.+)$/m);
   return {
     name: nameM ? nameM[1].trim() : '',
     description: descM ? descM[1].trim().replace(/^["']|["']$/g, '') : '',
     body,
     frontmatter: fm,
     path: filePath,
+    processStage: processStageM ? processStageM[1].trim() : undefined,
+    processOrder: processOrderM ? parseFloat(processOrderM[1].trim()) : undefined,
+    lifecycleOrder: lifecycleOrderM ? parseFloat(lifecycleOrderM[1].trim()) : undefined,
   };
 }
 
-// ── Phase inference ──
+// ── Stage inference — 3-layer classifier & sorter ──
+// Spec: docs/src-notes/core_scripts_discover.md §단계 추론
+//
+//   Layer A (stage 배정):     processStage ?? OVERRIDE_TABLE[id] ?? inferStageByKeywords ?? 'Other'
+//   Layer B (stage 순서):     STAGE_ORDER 고정 배열 — 메인 흐름 27 + 교차횡단 3
+//   Layer C (stage 내 정렬):  (methodologyPriority, processOrder, numericPrefix, stepIndex, alpha)
 
-function inferPhase(name, description) {
-  const numeric = name && name.match(/^(\d+)-/);
-  if (numeric) return { phase: `Phase ${numeric[1]}`, explicit: true };
+// ── Stage taxonomy (30 stages: 27 main flow + 3 cross-cutting) ──
+
+const STAGE_ORDER = [
+  // Main flow — project-time 순서
+  'Onboarding',
+  'Alignment',
+  'Discovery',
+  'Research',
+  'Requirements — Mapping',
+  'Requirements — Spec',
+  'Requirements — Validation',
+  'Design — UX',
+  'Design — Architecture',
+  'Design — Narrative/Content',
+  'Design — Asset Spec',
+  'Planning — Epics',
+  'Planning — Stories',
+  'Planning — Sprint',
+  'Test Strategy',
+  'Implementation — Dev',
+  'Implementation — Assets',
+  'Code Review',
+  'Test — Automation',
+  'QA — NFR',
+  'QA — Review/Trace',
+  'CI/CD',
+  'User Testing',
+  'Integration & Ship',
+  'Retrospective',
+  'Milestone Close',
+  'Evolution',
+  // Cross-cutting bands — 메인 흐름 뒤
+  'Control',
+  'Docs',
+  'Progress',
+];
+
+const STAGE_INDEX = Object.create(null);
+STAGE_ORDER.forEach((s, i) => { STAGE_INDEX[s] = i; });
+
+// ── Stage keywords — Layer A step ③ (priority-first match on name, then description) ──
+// Specificity 내림차순: 좁은 패턴을 먼저 두어 넓은 패턴이 덮지 않도록.
+const STAGE_KEYWORDS = [
+  // Requirements variants (validation > mapping > spec — validation must beat 'prd' on spec)
+  ['Requirements — Validation', /\b(validate-prd|check-implementation-readiness|implementation-readiness)\b/i],
+  ['Requirements — Mapping',    /\b(trigger-mapping|scenarios?)\b/i],
+  ['Requirements — Spec',       /\b(create-prd|edit-prd|create-gdd|quick-spec|\bprd\b|\bgdd\b)\b/i],
+
+  // Test/QA variants (strategy > automation > review/trace > NFR; User Testing is separate)
+  ['Test Strategy',             /\b(test-design|test-framework|\batdd\b|test-driven-development|\btdd\b)\b/i],
+  ['Test — Automation',         /\b(test-automate|e2e-scaffold|\be2e\b|qa-generate-e2e|add-tests|automate-tests)\b/i],
+  ['QA — NFR',                  /\b(\bnfr\b|performance-test|performance-profil)\b/i],
+  ['QA — Review/Trace',         /\b(test-review|\btrace\b|traceability|validate-phase|audit-uat|verification-before-completion|verify-work)\b/i],
+  ['User Testing',              /\b(playtest|uat)\b/i],
+
+  // Code Review before generic 'review'
+  ['Code Review',               /\b(code-review|requesting-code-review|receiving-code-review|adversarial-review|edge-case-hunter)\b/i],
+
+  // CI/CD before Implementation (ci keyword)
+  ['CI/CD',                     /\b(testarch-ci|ci-pipeline|setup-ci|scaffold-ci|ci\/cd)\b/i],
+
+  // Implementation
+  ['Implementation — Assets',   /\b(asset-generation)\b/i],
+  ['Implementation — Dev',      /\b(dev-story|quick-dev(-new-preview)?|execute-phase|\bautonomous\b|executing-plans|subagent-driven|agentic-development|quick-flow|implement\w*|\bexecut\w*)\b/i],
+
+  // Planning (sprint > stories > epics — sprint is most specific)
+  ['Planning — Sprint',         /\b(sprint-planning|sprint-status|plan-milestone-gaps|add-phase|insert-phase|\broadmap\b)\b/i],
+  ['Planning — Stories',        /\b(create-story|plan-phase|discuss-phase|writing-plans|create-the-next-story)\b/i],
+  ['Planning — Epics',          /\b(create-epics|epics-and-stories|\bepic\w*)\b/i],
+
+  // Design (asset spec > narrative > architecture > UX)
+  ['Design — Asset Spec',       /\b(asset-spec|design-asset)\b/i],
+  ['Design — Narrative/Content',/\b(narrative|storytelling|create-narrative)\b/i],
+  ['Design — Architecture',     /\b(create-architecture|game-architecture|architect\w*)\b/i],
+  ['Design — UX',               /\b(ux-design|design-system|ui-phase|create-ux-design|\bux\b|design-thinking)\b/i],
+
+  // Upstream (research > discovery > alignment > onboarding)
+  ['Research',                  /\b(research\w*|market-research|domain-research|technical-research)\b/i],
+  ['Discovery',                 /\b(brainstorm\w*|innovation-strategy|problem-solving|elicit\w*|ideate\w*|discover\w*)\b/i],
+  ['Alignment',                 /\b(alignment-signoff|project-brief|product-brief|game-brief|\bbrief\b|\balignment\b)\b/i],
+  ['Onboarding',                /\b(project-setup|new-project|new-workspace|bmb-setup|bmad-init|\binit\b|workspace-init)\b/i],
+
+  // Closing chain
+  ['Retrospective',             /\bretrospective\b/i],
+  ['Milestone Close',           /\b(complete-milestone|milestone-summary|audit-milestone|archive\w*)\b/i],
+  ['Integration & Ship',        /\b(pr-branch|finishing-a-development-branch|\bship\b)\b/i],
+  ['Evolution',                 /\b(product-evolution|document-project|brownfield)\b/i],
+
+  // Cross-cutting bands — last
+  ['Progress',                  /\b(session-report|\bprogress\b|\bstats\b|add-todo|check-todos|\bnote\b|add-backlog|plant-seed|\bthread\b|workstreams|list-workspaces)\b/i],
+  ['Docs',                      /\b(distillator|index-docs|shard-doc|generate-project-context|editorial-review|map-codebase)\b/i],
+  ['Control',                   /\b(correct-course|pause-work|resume-work|rollback|debug\w*|forensics|\bmanager\b|\bhealth\b|cleanup|restore|reapply-patches)\b/i],
+];
+
+// ── OVERRIDE_TABLE — Layer A step ② (outliers, ≤20 entries) ──
+// Specific skill ids where keyword inference is wrong or ambiguous.
+// Keep small; large table signals that STAGE_KEYWORDS needs refinement.
+const OVERRIDE_TABLE = {
+  'gsd:new-milestone':                         'Requirements — Spec',
+  'gsd:new-project':                           'Onboarding',
+  'gsd:new-workspace':                         'Onboarding',
+  'gsd:ui-phase':                              'Design — UX',
+  'gsd:plan-phase':                            'Planning — Stories',
+  'gsd:discuss-phase':                         'Planning — Stories',
+  'gsd:execute-phase':                         'Implementation — Dev',
+  'gsd:autonomous':                            'Implementation — Dev',
+  'gsd:quick':                                 'Implementation — Dev',
+  'gsd:fast':                                  'Implementation — Dev',
+  'gsd:verify-work':                           'User Testing',
+  'gsd:audit-uat':                             'QA — Review/Trace',
+  'gsd:validate-phase':                        'QA — Review/Trace',
+  'gsd:ship':                                  'Integration & Ship',
+  'gsd:pr-branch':                             'Integration & Ship',
+  'gsd:map-codebase':                          'Docs',
+  'gsd:session-report':                        'Progress',
+  'superpowers:subagent-driven-development':   'Implementation — Dev',
+  'wds:6-asset-generation':                    'Implementation — Assets',
+  'bmad-cis:storytelling':                     'Design — Narrative/Content',
+};
+
+// ── Methodology ordering — Layer C ──
+// Default priority order. Override via `discoverAll({ methodologyPriority: [...] })`.
+const DEFAULT_METHODOLOGY_PRIORITY = [
+  'wds', 'bmad', 'bmad-testarch', 'bmad-cis', 'gds', 'gsd', 'superpowers',
+];
+
+// Curated intra-methodology step index (optional, partial). Only core flow skills.
+// Missing entries fall through to processOrder / numericPrefix / alphabetical in compareSkills.
+const METHODOLOGY_STEP_INDEX = {
+  // wds — project phases have numeric prefix, covered by numericPrefixIndex. Keep this empty for wds.
+  // bmad core flow
+  'bmad:brainstorming':            10,
+  'bmad:product-brief':             20,
+  'bmad:create-prd':                30,
+  'bmad:validate-prd':              40,
+  'bmad:check-implementation-readiness': 45,
+  'bmad:create-architecture':       50,
+  'bmad:create-ux-design':          55,
+  'bmad:create-epics-and-stories':  60,
+  'bmad:create-story':              70,
+  'bmad:sprint-planning':           80,
+  'bmad:dev-story':                 90,
+  'bmad:code-review':              100,
+  'bmad:retrospective':            110,
+  // gds — mirrors bmad
+  'gds:brainstorm-game':            10,
+  'gds:create-game-brief':           20,
+  'gds:create-gdd':                 30,
+  'gds:check-implementation-readiness': 45,
+  'gds:game-architecture':          50,
+  'gds:create-ux-design':           55,
+  'gds:create-narrative':           58,
+  'gds:create-epics-and-stories':   60,
+  'gds:create-story':               70,
+  'gds:sprint-planning':            80,
+  'gds:dev-story':                  90,
+  'gds:code-review':               100,
+  'gds:retrospective':             110,
+  // gsd core flow
+  'gsd:new-project':                 5,
+  'gsd:new-milestone':              10,
+  'gsd:discuss-phase':              15,
+  'gsd:plan-phase':                 20,
+  'gsd:execute-phase':              30,
+  'gsd:autonomous':                 31,
+  'gsd:verify-work':                40,
+  'gsd:ship':                       50,
+  'gsd:complete-milestone':         60,
+  // superpowers
+  'superpowers:brainstorming':      10,
+  'superpowers:writing-plans':      20,
+  'superpowers:test-driven-development': 25,
+  'superpowers:executing-plans':    30,
+  'superpowers:subagent-driven-development': 35,
+  'superpowers:requesting-code-review': 40,
+  'superpowers:receiving-code-review': 45,
+  'superpowers:verification-before-completion': 50,
+  'superpowers:finishing-a-development-branch': 60,
+};
+
+// ── Layer A — stage assignment ──
+
+function inferStageByKeywords(name, description) {
   const nameLower = (name || '').toLowerCase();
   const descLower = (description || '').toLowerCase();
-  // Priority 1: match on name (stronger signal than description).
-  for (const [phase, re] of PHASE_KEYWORDS) {
-    if (re.test(nameLower)) return { phase, explicit: false };
+  for (const [stage, re] of STAGE_KEYWORDS) {
+    if (re.test(nameLower)) return stage;
   }
-  // Priority 2: match on description.
-  for (const [phase, re] of PHASE_KEYWORDS) {
-    if (re.test(descLower)) return { phase, explicit: false };
+  for (const [stage, re] of STAGE_KEYWORDS) {
+    if (re.test(descLower)) return stage;
   }
-  return { phase: 'Other', explicit: false };
+  return null;
 }
+
+function classifyStage({ id, name = '', description = '', processStage } = {}) {
+  // ① frontmatter
+  if (processStage && STAGE_INDEX[processStage] != null) {
+    return { phase: processStage, explicit: true, source: 'frontmatter' };
+  }
+  // ② override table
+  if (id && OVERRIDE_TABLE[id]) {
+    return { phase: OVERRIDE_TABLE[id], explicit: true, source: 'override' };
+  }
+  // ③ keyword inference
+  const keywordStage = inferStageByKeywords(name, description);
+  if (keywordStage) {
+    return { phase: keywordStage, explicit: false, source: 'keyword' };
+  }
+  // ④ fallback
+  return { phase: 'Other', explicit: false, source: 'fallback' };
+}
+
+// Backward-compat: 기존 호출부는 (name, description) 으로만 쓰므로 시그니처 유지.
+// `options.{id, processStage}` 주입 시 ①②가 활성화된다.
+function inferPhase(name, description, options = {}) {
+  return classifyStage({
+    id: options.id,
+    name,
+    description,
+    processStage: options.processStage,
+  });
+}
+
+// ── Layer B — stage index for ordering ──
+function stageIndexOf(phase) {
+  const idx = STAGE_INDEX[phase];
+  return idx != null ? idx : STAGE_ORDER.length; // 'Other' / unknown → 맨 끝
+}
+
+// ── Layer C — intra-stage sort comparator ──
+
+function numericPrefixIndex(name) {
+  const m = (name || '').match(/^(\d+)-/);
+  return m ? parseInt(m[1], 10) : Infinity;
+}
+
+function makeCompareSkills({ methodologyPriority } = {}) {
+  const pri = Array.isArray(methodologyPriority) && methodologyPriority.length
+    ? methodologyPriority
+    : DEFAULT_METHODOLOGY_PRIORITY;
+  const priIdx = Object.create(null);
+  pri.forEach((src, i) => { priIdx[src] = i; });
+
+  return function compareSkills(a, b) {
+    // 1. Stage order
+    const sa = stageIndexOf(a.phase);
+    const sb = stageIndexOf(b.phase);
+    if (sa !== sb) return sa - sb;
+    // 2. Methodology priority (unknown source → end)
+    const ma = priIdx[a.source] != null ? priIdx[a.source] : pri.length;
+    const mb = priIdx[b.source] != null ? priIdx[b.source] : pri.length;
+    if (ma !== mb) return ma - mb;
+    // 3. processOrder frontmatter
+    const poA = a.processOrder != null ? a.processOrder : Infinity;
+    const poB = b.processOrder != null ? b.processOrder : Infinity;
+    if (poA !== poB) return poA - poB;
+    // 4. Numeric prefix on name (wds-0-*, wds-1-*, ...)
+    const npA = numericPrefixIndex(a.name);
+    const npB = numericPrefixIndex(b.name);
+    if (npA !== npB) return npA - npB;
+    // 5. Curated methodology step index
+    const stA = METHODOLOGY_STEP_INDEX[a.id] != null ? METHODOLOGY_STEP_INDEX[a.id] : Infinity;
+    const stB = METHODOLOGY_STEP_INDEX[b.id] != null ? METHODOLOGY_STEP_INDEX[b.id] : Infinity;
+    if (stA !== stB) return stA - stB;
+    // 6. Alphabetical
+    return (a.id || '').localeCompare(b.id || '');
+  };
+}
+
+const compareSkills = makeCompareSkills();
 
 // ── Usage trigger ──
 
@@ -349,32 +603,98 @@ function scanLocation(spec) {
   return out;
 }
 
-// ─────────────────────── workflow filter ─────────────────────────
+// ─────────────────── classification (Stage 2) ────────────────────
+//
+// Framework (spec: docs/src-notes/core_scripts_discover.md §Stage 2):
+//
+//   classify_component:
+//     if has_feedback_loop or not is_atomic → Agentic Workflow
+//     else                                  → Methodology Skill
+//
+// Current attribute approximation (vocabulary proxy):
+//
+//   is_atomic          ← E1∨E2∨E3∨E4 matched, or NOT (I1 ∧ I2)
+//   has_feedback_loop  ← (not yet signaled — reserved for structural
+//                         signals like invoke count, loop/retry language,
+//                         workflow.md feedback steps)
 
-function isAgenticWorkflow(parsed, name) {
+function classifyComponent(parsed, name) {
   const desc = parsed.description || '';
   const body = parsed.body || '';
   const text = `${desc}\n${body}`;
+  const signals = [];
 
+  // Exclusion signals (E1–E4) → is_atomic = true (methodology skill).
+  let isAtomic = false;
+  let exclusionReason = null;
   if (E1_AGENT_PERSONA.test(desc)) {
-    return { included: false, reason: 'E1 agent persona' };
+    isAtomic = true;
+    exclusionReason = 'E1 agent persona';
+    signals.push('E1');
+  } else if (name && /-agent-/.test(name)) {
+    isAtomic = true;
+    exclusionReason = 'E2 name contains -agent-';
+    signals.push('E2');
+  } else if (E3_UTILITY_START.test(desc)) {
+    isAtomic = true;
+    exclusionReason = 'E3 utility/settings';
+    signals.push('E3');
+  } else if (E4_QUERY_START.test(desc)) {
+    isAtomic = true;
+    exclusionReason = 'E4 query/help';
+    signals.push('E4');
+  } else {
+    // No exclusion → check inclusion signals (I1 ∧ I2).
+    const i1 = I1_VERBS.test(text);
+    const i2 = I2_NOUNS.test(text);
+    if (i1) signals.push('I1');
+    if (i2) signals.push('I2');
+    if (!i1) {
+      isAtomic = true;
+      exclusionReason = 'I1 missing workflow verb';
+    } else if (!i2) {
+      isAtomic = true;
+      exclusionReason = 'I2 missing workflow noun';
+    } else {
+      isAtomic = false; // Both workflow verb and artifact noun present.
+    }
   }
-  if (name && /-agent-/.test(name)) {
-    return { included: false, reason: 'E2 name contains -agent-' };
+
+  // has_feedback_loop is not yet signaled by the vocabulary proxy.
+  // Reserved for future structural enhancement (invokes count, loop/retry
+  // language, workflow.md feedback steps). See src-notes §5.
+  const hasFeedbackLoop = false;
+
+  const isWorkflow = hasFeedbackLoop || !isAtomic;
+
+  if (isWorkflow) {
+    return {
+      type: 'Agentic Workflow',
+      category: 'Planning/Reasoning',
+      description: '이 요소는 결과에 따라 다음 행동을 결정하는 제어 흐름을 가집니다.',
+      isAtomic,
+      hasFeedbackLoop,
+      signals,
+      included: true,
+      reason: 'workflow',
+    };
   }
-  if (E3_UTILITY_START.test(desc)) {
-    return { included: false, reason: 'E3 utility/settings' };
-  }
-  if (E4_QUERY_START.test(desc)) {
-    return { included: false, reason: 'E4 query/help' };
-  }
-  if (!I1_VERBS.test(text)) {
-    return { included: false, reason: 'I1 missing workflow verb' };
-  }
-  if (!I2_NOUNS.test(text)) {
-    return { included: false, reason: 'I2 missing workflow noun' };
-  }
-  return { included: true, reason: 'workflow' };
+  return {
+    type: 'Methodology Skill',
+    category: 'Action/Tool',
+    description: '이 요소는 특정 입력을 받아 결과를 내놓는 단일 기능 단위입니다.',
+    isAtomic,
+    hasFeedbackLoop,
+    signals,
+    included: false,
+    reason: exclusionReason,
+  };
+}
+
+// Backward-compatible wrapper used by `discoverAll` gating and by tests.
+function isAgenticWorkflow(parsed, name) {
+  const r = classifyComponent(parsed, name);
+  return { included: r.included, reason: r.reason };
 }
 
 // ─────────────────────── source extraction ───────────────────────
@@ -485,17 +805,23 @@ function discoverAll(options = {}) {
     const nameOnly = nameRaw;
     const rank = RANK[c.type];
 
-    const wf = isAgenticWorkflow(parsed, nameOnly);
-    if (workflowOnly && !wf.included) {
-      if (debug) process.stderr.write(`[EXCLUDED] ${id} — ${wf.reason}\n`);
+    const cls = classifyComponent(parsed, nameOnly);
+    if (workflowOnly && !cls.included) {
+      if (debug) process.stderr.write(`[EXCLUDED] ${id} — ${cls.reason}\n`);
       continue;
     }
-    if (debug && wf.included) process.stderr.write(`[INCLUDED] ${id}\n`);
+    if (debug && cls.included) process.stderr.write(`[INCLUDED] ${id}\n`);
 
     const workflowContent = readWorkflowMd(c.filePath);
-    // Use idName (source-stripped) so `wds-0-*` passes as `0-*` for numeric-prefix detection.
-    const { phase, explicit: phaseExplicit } = inferPhase(idName, parsed.description);
+    const outputs = extractOutputs(parsed, workflowContent);
     const invokes = extractInvokes(parsed.body);
+
+    // Layer A (stage 배정) — id 포함으로 OVERRIDE_TABLE 활성화.
+    // idName(source-stripped)을 name 로 넘겨 prefix 중복 없는 키워드 매칭 유지.
+    const phaseResult = inferPhase(idName, parsed.description, {
+      id,
+      processStage: parsed.processStage,
+    });
 
     skills.push({
       id,
@@ -505,21 +831,35 @@ function discoverAll(options = {}) {
       description: parsed.description,
       path: c.filePath,
       rank,
+      classification: cls.type,         // 'Agentic Workflow' | 'Methodology Skill'
+      classificationCategory: cls.category,
+      isAtomic: cls.isAtomic,
+      hasFeedbackLoop: cls.hasFeedbackLoop,
+      classificationSignals: cls.signals,
       compactionAware: detectCompactionAware(parsed.body),
       interactive: detectInteractive(parsed.description, parsed.body),
       defaultCheckpoint: inferDefaultCheckpoint(parsed.description, parsed.body),
-      phase,
-      phaseExplicit,
+      phase: phaseResult.phase,
+      phaseExplicit: phaseResult.explicit,
+      phaseSource: phaseResult.source,      // 'frontmatter' | 'override' | 'keyword' | 'fallback'
+      stageIndex: stageIndexOf(phaseResult.phase),
       usageTrigger: extractUsageTrigger(parsed.description),
       inputs: extractInputs(parsed),
-      outputs: extractOutputs(parsed, workflowContent),
+      outputs,
       invokes,
       complexity: inferComplexity(parsed, workflowContent, invokes.length),
       tools: extractTools(parsed.frontmatter),
+      processStage: parsed.processStage,
+      processOrder: parsed.processOrder,
+      lifecycleOrder: parsed.lifecycleOrder,
     });
   }
 
-  return dedupByPriority(skills, { debug });
+  const deduped = dedupByPriority(skills, { debug });
+  // Layer B+C — stage 순서 + 단계 내 정렬. 호출측은 이미 정렬된 배열을 받는다.
+  const cmp = makeCompareSkills({ methodologyPriority: options.methodologyPriority });
+  deduped.sort(cmp);
+  return deduped;
 }
 
 // ─────────────────────────────── CLI ─────────────────────────────
@@ -537,6 +877,7 @@ module.exports = {
   readInstalledPlugins,
   scanLocation,
   parseSkillMd,
+  classifyComponent,
   isAgenticWorkflow,
   extractSource,
   dedupByPriority,
@@ -544,6 +885,12 @@ module.exports = {
   detectInteractive,
   inferDefaultCheckpoint,
   inferPhase,
+  classifyStage,
+  inferStageByKeywords,
+  stageIndexOf,
+  numericPrefixIndex,
+  compareSkills,
+  makeCompareSkills,
   extractUsageTrigger,
   readWorkflowMd,
   extractOutputs,
@@ -552,4 +899,10 @@ module.exports = {
   inferComplexity,
   extractTools,
   KNOWN_PREFIXES,
+  STAGE_ORDER,
+  STAGE_INDEX,
+  STAGE_KEYWORDS,
+  OVERRIDE_TABLE,
+  DEFAULT_METHODOLOGY_PRIORITY,
+  METHODOLOGY_STEP_INDEX,
 };

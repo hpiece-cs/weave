@@ -381,6 +381,57 @@ test('19. reason string always returned', () => {
   assert.strictEqual(typeof r2.reason, 'string');
 });
 
+// ─────────── classifyComponent — Stage 2 framework (4) ───────────
+
+test('19a. classifyComponent returns Agentic Workflow with full shape', () => {
+  const c = discover.classifyComponent(
+    { description: 'Create a PRD from scratch.', body: 'Body mentions plan and spec.' },
+    'create-prd'
+  );
+  assert.strictEqual(c.type, 'Agentic Workflow');
+  assert.strictEqual(c.category, 'Planning/Reasoning');
+  assert.strictEqual(c.isAtomic, false);
+  assert.strictEqual(c.hasFeedbackLoop, false);
+  assert.strictEqual(c.included, true);
+  assert.ok(c.signals.includes('I1') && c.signals.includes('I2'));
+});
+
+test('19b. classifyComponent returns Methodology Skill for persona (E1)', () => {
+  const c = discover.classifyComponent(
+    { description: 'Use when user asks to talk to Mary.', body: '' },
+    'some-skill'
+  );
+  assert.strictEqual(c.type, 'Methodology Skill');
+  assert.strictEqual(c.category, 'Action/Tool');
+  assert.strictEqual(c.isAtomic, true);
+  assert.strictEqual(c.hasFeedbackLoop, false);
+  assert.strictEqual(c.included, false);
+  assert.ok(c.signals.includes('E1'));
+});
+
+test('19c. classifyComponent Methodology Skill for utility start (E3)', () => {
+  const c = discover.classifyComponent(
+    { description: 'Manage per-agent settings.json configurations.', body: '' },
+    'agent-settings'
+  );
+  assert.strictEqual(c.type, 'Methodology Skill');
+  assert.strictEqual(c.isAtomic, true);
+  assert.ok(c.signals.includes('E3'));
+});
+
+test('19d. isAgenticWorkflow stays backward-compatible wrapper', () => {
+  const c = discover.classifyComponent(
+    { description: 'Create a PRD.', body: 'Body mentions plan and spec.' },
+    'create-prd'
+  );
+  const w = discover.isAgenticWorkflow(
+    { description: 'Create a PRD.', body: 'Body mentions plan and spec.' },
+    'create-prd'
+  );
+  assert.strictEqual(w.included, c.included);
+  assert.strictEqual(w.reason, c.reason);
+});
+
 // ─────────────────── extractSource (5) ──────────────────
 
 test('20. extractSource plugin-skill uses pluginContext.name', () => {
@@ -521,15 +572,16 @@ test('31. inferDefaultCheckpoint returns "verify" for review/test keywords', () 
 
 // ─────────────── inferPhase (3) ────────────────
 
-test('32. inferPhase explicit numeric prefix → "Phase N"', () => {
+test('32. inferPhase keyword — alignment skill → Alignment stage', () => {
   const r = discover.inferPhase('0-alignment-signoff', 'Create alignment');
-  assert.strictEqual(r.phase, 'Phase 0');
-  assert.strictEqual(r.explicit, true);
+  assert.strictEqual(r.phase, 'Alignment');
+  assert.strictEqual(r.explicit, false);
+  assert.strictEqual(r.source, 'keyword');
 });
 
-test('33. inferPhase keyword-based (Requirements)', () => {
+test('33. inferPhase keyword-based (Requirements — Spec)', () => {
   const r = discover.inferPhase('create-prd', 'Create a PRD from scratch');
-  assert.strictEqual(r.phase, 'Requirements');
+  assert.strictEqual(r.phase, 'Requirements — Spec');
   assert.strictEqual(r.explicit, false);
 });
 
@@ -537,6 +589,7 @@ test('34. inferPhase fallback → "Other"', () => {
   const r = discover.inferPhase('mystery', 'Does something unclassified');
   assert.strictEqual(r.phase, 'Other');
   assert.strictEqual(r.explicit, false);
+  assert.strictEqual(r.source, 'fallback');
 });
 
 // ─────────────── extractUsageTrigger (2) ────────────────
@@ -673,28 +726,28 @@ test('50. extractInputs rejects word-fragment noise ("after all tasks")', () => 
   assert.ok(!inputs.some((s) => /^(all|every)\s/i.test(s)), 'noise "all tasks" must be filtered');
 });
 
-test('51. inferPhase prefers name over description (test-driven-development → Implementation)', () => {
+test('51. inferPhase: test-driven-development → Test Strategy (not Implementation)', () => {
   const r = discover.inferPhase(
     'test-driven-development',
     'Use when implementing any feature or bugfix, before writing implementation code'
   );
-  assert.strictEqual(r.phase, 'Implementation');
+  assert.strictEqual(r.phase, 'Test Strategy');
 });
 
-test('52. inferPhase: research skill not misclassified as Design by "architecture" keyword', () => {
+test('52. inferPhase: technical-research → Research (not Design — Architecture)', () => {
   const r = discover.inferPhase(
     'technical-research',
     'Conduct technical research on technologies and architecture'
   );
-  assert.strictEqual(r.phase, 'Discovery');
+  assert.strictEqual(r.phase, 'Research');
 });
 
-test('53. inferPhase: dev-story → Implementation (not Planning by "story" keyword)', () => {
+test('53. inferPhase: dev-story → Implementation — Dev (not Planning — Stories)', () => {
   const r = discover.inferPhase(
     'dev-story',
     'Execute story implementation following a context filled story spec file'
   );
-  assert.strictEqual(r.phase, 'Implementation');
+  assert.strictEqual(r.phase, 'Implementation — Dev');
 });
 
 test('54. inferComplexity: orchestrators with 3+ invokes are "full"', () => {
@@ -707,7 +760,7 @@ test('55. inferComplexity: 1-2 invokes bump quick body to medium', () => {
   assert.strictEqual(c1, 'medium');
 });
 
-test('56. discoverAll assigns "Phase N" for source-prefixed numeric skills (wds-0-*)', () => {
+test('56. discoverAll: wds numeric-prefix skill classified by keyword + stageIndex set', () => {
   const skills = discover.discoverAll({
     workflowOnly: true,
     homeDir: TEST_HOME,
@@ -715,8 +768,10 @@ test('56. discoverAll assigns "Phase N" for source-prefixed numeric skills (wds-
   });
   const wds = skills.find((s) => s.id === 'wds:0-test-phase');
   assert.ok(wds, 'wds-0-test-phase should be discovered as wds:0-test-phase');
-  assert.strictEqual(wds.phase, 'Phase 0');
-  assert.strictEqual(wds.phaseExplicit, true);
+  // Fixture description mentions "alignment document" → Alignment stage by keyword.
+  assert.strictEqual(wds.phase, 'Alignment');
+  assert.strictEqual(typeof wds.stageIndex, 'number');
+  assert.ok(wds.stageIndex >= 0 && wds.stageIndex < 30);
 });
 
 test('57. I1/I2 filter: "Map business goals through structured workshops" passes (workshop/mapping)', () => {
@@ -750,4 +805,139 @@ test('60. I1/I2 filter: still rejects pure query "Show X status"', () => {
   );
   assert.strictEqual(r.included, false);
   assert.match(r.reason, /E4/);
+});
+
+// ─────────── 3-layer classifier (Layer A/B/C) — (11) ───────────
+
+test('61. Layer A ①: processStage frontmatter overrides keyword inference', () => {
+  const r = discover.inferPhase(
+    'dev-story',
+    'Execute story implementation',
+    { processStage: 'Design — UX' }
+  );
+  assert.strictEqual(r.phase, 'Design — UX');
+  assert.strictEqual(r.explicit, true);
+  assert.strictEqual(r.source, 'frontmatter');
+});
+
+test('62. Layer A ①: invalid processStage falls through to keyword', () => {
+  const r = discover.inferPhase(
+    'create-prd',
+    'Create a PRD',
+    { processStage: 'NotARealStage' }
+  );
+  assert.strictEqual(r.phase, 'Requirements — Spec');
+  assert.strictEqual(r.explicit, false);
+  assert.strictEqual(r.source, 'keyword');
+});
+
+test('63. Layer A ②: OVERRIDE_TABLE id match beats keyword', () => {
+  // gsd:new-milestone keyword would catch Onboarding/etc. if any; override forces Requirements — Spec.
+  const r = discover.inferPhase(
+    'new-milestone',
+    'Start a new milestone cycle — update PROJECT.md and route to requirements',
+    { id: 'gsd:new-milestone' }
+  );
+  assert.strictEqual(r.phase, 'Requirements — Spec');
+  assert.strictEqual(r.explicit, true);
+  assert.strictEqual(r.source, 'override');
+});
+
+test('64. Layer A ②: OVERRIDE_TABLE handles verify-work → User Testing', () => {
+  // keyword would match QA — Review/Trace via "verify-work"; override forces User Testing.
+  const r = discover.inferPhase(
+    'verify-work',
+    'Validate built features through conversational UAT',
+    { id: 'gsd:verify-work' }
+  );
+  assert.strictEqual(r.phase, 'User Testing');
+  assert.strictEqual(r.source, 'override');
+});
+
+test('65. Layer A ③: test-design → Test Strategy (not Design — UX)', () => {
+  const r = discover.inferPhase(
+    'test-design',
+    'Create system-level or epic-level test plans'
+  );
+  assert.strictEqual(r.phase, 'Test Strategy');
+});
+
+test('66. Layer A ③: ship → Integration & Ship', () => {
+  const r = discover.inferPhase(
+    'ship',
+    'Create PR, run review, and prepare for merge after verification passes'
+  );
+  assert.strictEqual(r.phase, 'Integration & Ship');
+});
+
+test('67. Layer A ③: progress / session-report → Progress cross-cutting band', () => {
+  const r1 = discover.inferPhase('progress', 'Check project progress');
+  assert.strictEqual(r1.phase, 'Progress');
+  const r2 = discover.inferPhase('session-report', 'Generate a session report');
+  assert.strictEqual(r2.phase, 'Progress');
+});
+
+test('68. Layer B: stageIndexOf assigns ascending index to STAGE_ORDER', () => {
+  assert.strictEqual(discover.stageIndexOf('Onboarding'), 0);
+  assert.ok(discover.stageIndexOf('Implementation — Dev') > discover.stageIndexOf('Planning — Sprint'));
+  assert.ok(discover.stageIndexOf('Retrospective') > discover.stageIndexOf('Integration & Ship'));
+  assert.ok(discover.stageIndexOf('Progress') >= 27); // cross-cutting, after main flow
+  // Unknown → max (pushed to end)
+  assert.strictEqual(discover.stageIndexOf('Other'), discover.STAGE_ORDER.length);
+});
+
+test('69. Layer C: compareSkills sorts by (stage → methodology → processOrder → numericPrefix → step → alpha)', () => {
+  const skills = [
+    { id: 'gsd:autonomous',           name: 'autonomous',           source: 'gsd',    phase: 'Implementation — Dev' },
+    { id: 'bmad:dev-story',           name: 'dev-story',            source: 'bmad',   phase: 'Implementation — Dev' },
+    { id: 'bmad:create-prd',          name: 'create-prd',           source: 'bmad',   phase: 'Requirements — Spec' },
+    { id: 'wds:0-project-setup',      name: '0-project-setup',      source: 'wds',    phase: 'Onboarding' },
+    { id: 'bmad:brainstorming',       name: 'brainstorming',        source: 'bmad',   phase: 'Discovery' },
+  ];
+  const sorted = skills.slice().sort(discover.compareSkills);
+  const order = sorted.map((s) => s.id);
+  // Onboarding first, then Discovery, Requirements — Spec, finally Implementation — Dev
+  assert.deepStrictEqual(order, [
+    'wds:0-project-setup',
+    'bmad:brainstorming',
+    'bmad:create-prd',
+    'bmad:dev-story',
+    'gsd:autonomous',
+  ]);
+});
+
+test('70. Layer C: same-stage different methodology — priority prefers wds → bmad → gds → gsd → superpowers', () => {
+  const skills = [
+    { id: 'superpowers:executing-plans', name: 'executing-plans', source: 'superpowers', phase: 'Implementation — Dev' },
+    { id: 'gsd:execute-phase',           name: 'execute-phase',   source: 'gsd',         phase: 'Implementation — Dev' },
+    { id: 'bmad:dev-story',              name: 'dev-story',       source: 'bmad',        phase: 'Implementation — Dev' },
+  ];
+  const sorted = skills.slice().sort(discover.compareSkills);
+  assert.deepStrictEqual(sorted.map((s) => s.source), ['bmad', 'gsd', 'superpowers']);
+});
+
+test('71. Layer C: custom methodologyPriority honored', () => {
+  const cmp = discover.makeCompareSkills({ methodologyPriority: ['gsd', 'bmad', 'wds'] });
+  const skills = [
+    { id: 'wds:5-agentic-development',   name: '5-agentic-development', source: 'wds',  phase: 'Implementation — Dev' },
+    { id: 'bmad:dev-story',              name: 'dev-story',             source: 'bmad', phase: 'Implementation — Dev' },
+    { id: 'gsd:execute-phase',           name: 'execute-phase',         source: 'gsd',  phase: 'Implementation — Dev' },
+  ];
+  const sorted = skills.slice().sort(cmp);
+  assert.deepStrictEqual(sorted.map((s) => s.source), ['gsd', 'bmad', 'wds']);
+});
+
+test('72. discoverAll: Skill exposes phase, phaseExplicit, phaseSource, stageIndex', () => {
+  const skills = discover.discoverAll({
+    workflowOnly: true,
+    homeDir: TEST_HOME,
+    cwd: TEST_CWD,
+  });
+  const prd = skills.find((s) => s.id === 'bmad:create-prd');
+  assert.ok(prd, 'bmad:create-prd should exist');
+  assert.strictEqual(prd.phase, 'Requirements — Spec');
+  assert.strictEqual(prd.phaseExplicit, false);
+  assert.strictEqual(prd.phaseSource, 'keyword');
+  assert.strictEqual(typeof prd.stageIndex, 'number');
+  assert.strictEqual(prd.stageIndex, discover.STAGE_INDEX['Requirements — Spec']);
 });
