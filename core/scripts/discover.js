@@ -10,6 +10,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+const sourceRegistry = require('./source-registry.js');
+
 // ── Known prefixes (longest first for correct matching) ──
 const KNOWN_PREFIXES = [
   'bmad-testarch',
@@ -707,6 +709,12 @@ function extractSource(filePath, type, context) {
     return path.basename(path.dirname(filePath));
   }
   // home-skill / project-skill
+  // Priority 1 — source registry (authoritative in the 2-pass discoverAll flow).
+  if (context && context.registry) {
+    const resolved = sourceRegistry.resolveSource(filePath, context.registry);
+    if (resolved) return resolved;
+  }
+  // Fallback — seed prefix match (legacy path: direct callers & tests).
   const dirName = path.basename(path.dirname(filePath));
   const extra = (context && context.customSourcePrefixes) || [];
   const all = [...extra, ...KNOWN_PREFIXES].sort((a, b) => b.length - a.length);
@@ -756,8 +764,20 @@ function dedupByPriority(skills, { debug = false } = {}) {
 
 // ───────────────────────── discoverAll ───────────────────────────
 
+// 2-pass discoverAll:
+//   Pass 1 — scan + parse, collect {candidate, parsed}.
+//   Derivation — source-registry.js: seed + trie boundaries + append-only registry.
+//   Pass 2 — assign source (via registry) + classify (pure) + 30-stage + assemble.
 function discoverAll(options = {}) {
-  const { workflowOnly = true, debug = false, homeDir, cwd, customSourcePrefixes } = options;
+  const {
+    workflowOnly = true,
+    debug = false,
+    homeDir,
+    cwd,
+    customSourcePrefixes,
+    minClusterSize = 2,
+    persistRegistry = true,
+  } = options;
   const home = homeDir || os.homedir();
   const cwdPath = cwd || process.cwd();
 
@@ -777,7 +797,8 @@ function discoverAll(options = {}) {
     candidates.push(...scanLocation(spec));
   }
 
-  const skills = [];
+  // ── Pass 1: parse only ────────────────────────────────────────
+  const parsedList = [];
   for (const c of candidates) {
     let content;
     try {
@@ -790,9 +811,42 @@ function discoverAll(options = {}) {
       if (debug) process.stderr.write(`skipped: no name in ${c.filePath}\n`);
       continue;
     }
+    parsedList.push({
+      filePath: c.filePath,
+      type: c.type,
+      pluginContext: c.pluginContext,
+      parsed,
+    });
+  }
 
-    const ctx = { ...c.pluginContext, customSourcePrefixes };
-    const source = extractSource(c.filePath, c.type, ctx);
+  // ── Derivation: seed + registry + trie boundaries ─────────────
+  const seed = [
+    ...(Array.isArray(customSourcePrefixes) ? customSourcePrefixes : []),
+    ...KNOWN_PREFIXES,
+  ];
+  const existingRegistry = persistRegistry ? sourceRegistry.loadRegistry() : null;
+  const derived = sourceRegistry.derivePrefixes(parsedList, {
+    seed,
+    existingRegistry,
+    minClusterSize,
+  });
+  // Build an in-memory registry object for resolveSource() in Pass 2.
+  const registry = { schemaVersion: sourceRegistry.SCHEMA_VERSION, assignments: derived.assignments };
+  if (persistRegistry) {
+    try {
+      sourceRegistry.saveRegistry(derived);
+    } catch (e) {
+      if (debug) process.stderr.write(`[source-registry] warn: could not write: ${e.message}\n`);
+    }
+  }
+
+  // ── Pass 2: source + classify + phase + assemble ──────────────
+  const skills = [];
+  for (const item of parsedList) {
+    const { filePath, type, pluginContext, parsed } = item;
+    const ctx = { ...pluginContext, customSourcePrefixes, registry };
+    const source = extractSource(filePath, type, ctx);
+
     // Strip any "source:" prefix from frontmatter name (commands convention).
     const nameRaw = parsed.name.includes(':')
       ? parsed.name.split(':').slice(1).join(':')
@@ -803,7 +857,7 @@ function discoverAll(options = {}) {
       : nameRaw;
     const id = `${source}:${idName}`;
     const nameOnly = nameRaw;
-    const rank = RANK[c.type];
+    const rank = RANK[type];
 
     const cls = classifyComponent(parsed, nameOnly);
     if (workflowOnly && !cls.included) {
@@ -812,7 +866,7 @@ function discoverAll(options = {}) {
     }
     if (debug && cls.included) process.stderr.write(`[INCLUDED] ${id}\n`);
 
-    const workflowContent = readWorkflowMd(c.filePath);
+    const workflowContent = readWorkflowMd(filePath);
     const outputs = extractOutputs(parsed, workflowContent);
     const invokes = extractInvokes(parsed.body);
 
@@ -827,9 +881,9 @@ function discoverAll(options = {}) {
       id,
       name: nameOnly,
       source,
-      type: c.type,
+      type,
       description: parsed.description,
-      path: c.filePath,
+      path: filePath,
       rank,
       classification: cls.type,         // 'Agentic Workflow' | 'Methodology Skill'
       classificationCategory: cls.category,

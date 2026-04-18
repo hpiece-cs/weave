@@ -5,18 +5,22 @@ const os = require('node:os');
 const path = require('node:path');
 const { CACHE_DIR } = require('./paths.js');
 const discover = require('./discover.js');
+const sourceRegistry = require('./source-registry.js');
 
 // Bump when the shape or filtering rules of cached groups change — this
 // forces old caches to be discarded on the next run.
 //   v1 → v2: compose-workflow.js 가 'Other' phase 를 그룹 목록에서 제외하고,
 //             각 그룹에 maxSrcWidth 필드를 추가했음.
-const CACHE_SCHEMA_VERSION = 2;
+//   v2 → v3: fingerprint 구성을 source-registry.json 의 derivedPrefixes 로부터
+//             동적으로 계산. 하드코딩된 homeSkillSources 제거.
+const CACHE_SCHEMA_VERSION = 3;
 const CACHE_FILE = path.join(CACHE_DIR, 'skill-groups.json');
 
+// v3 — registry-driven fingerprint.
+// Groups registry assignments by source; for each source aggregates file count +
+// latestMtime. No more hardcoded source list — whatever is in the registry drives
+// the fingerprint, so discover.js derivation and skill-cache cannot drift.
 function computeFingerprints() {
-  const home = os.homedir();
-  const skillsRoot = path.join(home, '.claude', 'skills');
-  const commandsRoot = path.join(home, '.claude', 'commands');
   const result = {};
 
   // Locale — cached groups may contain localized strings (phase descriptions,
@@ -26,78 +30,62 @@ function computeFingerprints() {
   const lang = rawLang.startsWith('ko') ? 'ko' : 'en';
   result.__locale = { lang };
 
-  // superpowers (plugin)
+  // Plugins — version + gitCommitSha are authoritative (not file mtime).
+  // We still emit a fingerprint per installed plugin so updates invalidate cache.
   const plugins = discover.readInstalledPlugins();
-  const sp = plugins.find(p => p.name === 'superpowers');
-  result.superpowers = sp
-    ? { version: sp.version || '', gitCommitSha: sp.gitCommitSha || '' }
-    : { version: '', gitCommitSha: '' };
-
-  // home-skills with prefix-based scanning
-  const homeSkillSources = [
-    { key: 'bmad-testarch', prefix: 'bmad-testarch-' },
-    { key: 'bmad-cis',      prefix: 'bmad-cis-' },
-    { key: 'bmad',          prefix: 'bmad-',
-      exclude: ['bmad-cis-', 'bmad-testarch-'] },
-    { key: 'gds',           prefix: 'gds-' },
-    { key: 'wds',           prefix: 'wds-' },
-  ];
-
-  let dirs = [];
-  try {
-    dirs = fs.readdirSync(skillsRoot);
-  } catch {}
-
-  for (const { key, prefix, exclude } of homeSkillSources) {
-    let count = 0;
-    let maxMtime = 0;
-    for (const d of dirs) {
-      if (!d.startsWith(prefix)) continue;
-      if (exclude && exclude.some(ex => d.startsWith(ex))) continue;
-      const skillFile = path.join(skillsRoot, d, 'SKILL.md');
-      try {
-        const st = fs.statSync(skillFile);
-        if (st.isFile()) {
-          count++;
-          if (st.mtimeMs > maxMtime) maxMtime = st.mtimeMs;
-        }
-      } catch {}
-    }
-    result[key] = {
-      count,
-      latestMtime: maxMtime ? new Date(maxMtime).toISOString() : null,
+  for (const p of plugins) {
+    result[p.name] = {
+      version: p.version || '',
+      gitCommitSha: p.gitCommitSha || '',
     };
   }
+  // Back-compat: older caches expected a `superpowers` key even if not installed.
+  if (!result.superpowers) {
+    result.superpowers = { version: '', gitCommitSha: '' };
+  }
 
-  // gsd (home-command): ~/.claude/commands/gsd/*.md
-  const gsdDir = path.join(commandsRoot, 'gsd');
-  let gsdCount = 0;
-  let gsdMaxMtime = 0;
-  try {
-    for (const f of fs.readdirSync(gsdDir)) {
-      if (!f.endsWith('.md')) continue;
-      const fp = path.join(gsdDir, f);
-      try {
-        const st = fs.statSync(fp);
-        if (st.isFile()) {
-          gsdCount++;
-          if (st.mtimeMs > gsdMaxMtime) gsdMaxMtime = st.mtimeMs;
-        }
-      } catch {}
+  // Registry — aggregate file stats per source (excluding plugin-* sources,
+  // which are fingerprinted by plugin metadata above).
+  const reg = sourceRegistry.loadRegistry();
+  if (reg && reg.assignments) {
+    const bySource = new Map();
+    for (const [filePath, entry] of Object.entries(reg.assignments)) {
+      if (!entry || !entry.source) continue;
+      if (entry.signal === 'plugin') continue;
+      if (!bySource.has(entry.source)) bySource.set(entry.source, []);
+      bySource.get(entry.source).push(filePath);
     }
-  } catch {}
-  result.gsd = {
-    count: gsdCount,
-    latestMtime: gsdMaxMtime ? new Date(gsdMaxMtime).toISOString() : null,
-  };
+    for (const [source, paths] of bySource) {
+      let count = 0;
+      let maxMtime = 0;
+      for (const p of paths) {
+        try {
+          const st = fs.statSync(p);
+          if (st.isFile()) {
+            count++;
+            if (st.mtimeMs > maxMtime) maxMtime = st.mtimeMs;
+          }
+        } catch {
+          /* file may have been removed — skip */
+        }
+      }
+      result[source] = {
+        count,
+        latestMtime: maxMtime ? new Date(maxMtime).toISOString() : null,
+      };
+    }
+  }
 
   return result;
 }
 
 function fingerprintsMatch(cached, current) {
-  for (const [key, cur] of Object.entries(current)) {
-    const prev = cached[key];
-    if (!prev) return false;
+  // Compare union of keys so either side gaining a new source invalidates.
+  const allKeys = new Set([...Object.keys(cached || {}), ...Object.keys(current || {})]);
+  for (const key of allKeys) {
+    const prev = cached && cached[key];
+    const cur = current && current[key];
+    if (!prev || !cur) return false;
     if ('lang' in cur) {
       if (prev.lang !== cur.lang) return false;
     } else if ('version' in cur) {
@@ -153,14 +141,15 @@ function getSkillGroups(buildGroupsFn, { force = false } = {}) {
     return { groups: cached.groups, byId, fromCache: true };
   }
 
-  // Cache miss: discover, build, save
+  // Cache miss: discover (populates source-registry), build, save.
+  // Fingerprint is recomputed AFTER discover so registry-driven keys are present.
   const discovered = discover.discoverAll({ workflowOnly: false });
   const workflowOnly = discover.discoverAll({ workflowOnly: true });
   const byId = new Map(discovered.map(s => [s.id, s]));
   const groups = buildGroupsFn(discovered, workflowOnly, byId);
 
   try {
-    saveCache(current, groups);
+    saveCache(computeFingerprints(), groups);
   } catch (e) {
     // Non-fatal — TUI still works without cache
     process.stderr.write(`[skill-cache] warn: could not write cache: ${e.message}\n`);

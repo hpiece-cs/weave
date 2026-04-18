@@ -13,6 +13,7 @@ const guard = require('./core/scripts/guard.js');
 const runtime = require('./core/scripts/runtime.js');
 const bridge = require('./core/scripts/context-bridge.js');
 const spawn = require('./core/scripts/spawn.js');
+const sourceRegistry = require('./core/scripts/source-registry.js');
 
 function usage() {
   return [
@@ -35,6 +36,9 @@ function usage() {
     '  compose-pick [--session-checked=id1,id2,...]      (single-pick for edit-session)',
     '  step prepare [--auto]                                 (guard + git-snapshot + wrapper)',
     '  step finish <artifacts-json>                          (register + advance + next wrapper)',
+    '  sources list                                           (registry contents + summary)',
+    '  sources resync [--dry-run]                             (rederive; reports id churn)',
+    '  sources orphans                                        (signal=unknown entries only)',
     '  help',
     '',
   ].join('\n');
@@ -213,6 +217,102 @@ function dispatchBridge(args) {
   return null;
 }
 
+function summarizeAssignments(assignments) {
+  const bySignal = {};
+  const bySource = {};
+  for (const entry of Object.values(assignments || {})) {
+    if (!entry || !entry.source) continue;
+    bySignal[entry.signal || 'unknown'] = (bySignal[entry.signal || 'unknown'] || 0) + 1;
+    bySource[entry.source] = (bySource[entry.source] || 0) + 1;
+  }
+  return { total: Object.keys(assignments || {}).length, bySignal, bySource };
+}
+
+function dispatchSources(args) {
+  const [op] = args;
+  if (!op || op === 'list') {
+    const reg = sourceRegistry.loadRegistry();
+    if (!reg) return { registry: null, summary: null };
+    return {
+      registry: reg,
+      summary: summarizeAssignments(reg.assignments),
+    };
+  }
+  if (op === 'orphans') {
+    const reg = sourceRegistry.loadRegistry();
+    if (!reg) return { orphans: [] };
+    const orphans = Object.entries(reg.assignments || {})
+      .filter(([, entry]) => entry && entry.signal === 'unknown')
+      .map(([filePath, entry]) => ({ filePath, source: entry.source, firstSeen: entry.firstSeen }));
+    return { orphans };
+  }
+  if (op === 'resync') {
+    const dryRun = args.includes('--dry-run');
+    const prev = sourceRegistry.loadRegistry();
+    // Re-scan from scratch (no existingRegistry → full rederivation).
+    // We use discoverAll with persistRegistry=false to get a fresh derivation
+    // without touching the on-disk registry yet.
+    const scanned = discover.discoverAll({ workflowOnly: false, persistRegistry: false });
+    // discoverAll has side-effect of NOT writing the registry (persistRegistry=false)
+    // but we still need the derivation result. Re-derive explicitly here:
+    //   1. rebuild parsedList via a fresh scan
+    //   2. run derivePrefixes with existingRegistry=null
+    const freshParsed = rebuildParsedList();
+    const fresh = sourceRegistry.derivePrefixes(freshParsed, {
+      seed: discover.KNOWN_PREFIXES,
+      existingRegistry: null,
+    });
+    const changed = sourceRegistry.diffAssignments(
+      prev ? prev.assignments : null,
+      fresh.assignments
+    );
+    if (!dryRun) sourceRegistry.saveRegistry(fresh);
+    return {
+      prevCount: prev ? Object.keys(prev.assignments || {}).length : 0,
+      nextCount: Object.keys(fresh.assignments).length,
+      changedCount: changed.length,
+      changed,
+      dryRun,
+      scannedSkills: scanned.length,
+    };
+  }
+  throw new Error(`Unknown sources op: ${op}`);
+}
+
+// rebuild a parsedList matching discover.js Pass 1 shape — used by
+// `sources resync` which needs to rederive without existingRegistry.
+function rebuildParsedList() {
+  const os = require('node:os');
+  const home = os.homedir();
+  const cwdPath = process.cwd();
+  const plugins = discover.readInstalledPlugins(home);
+  const specs = [];
+  for (const p of plugins) {
+    specs.push({ type: 'plugin-skill', root: p.installPath, pluginContext: p });
+    specs.push({ type: 'plugin-command', root: p.installPath, pluginContext: p });
+  }
+  specs.push({ type: 'home-skill', root: path.join(home, '.claude', 'skills') });
+  specs.push({ type: 'home-command', root: path.join(home, '.claude', 'commands') });
+  specs.push({ type: 'project-skill', root: path.join(cwdPath, '.claude', 'skills') });
+  specs.push({ type: 'project-command', root: path.join(cwdPath, '.claude', 'commands') });
+  const candidates = [];
+  for (const spec of specs) candidates.push(...discover.scanLocation(spec));
+  const parsedList = [];
+  for (const c of candidates) {
+    let content;
+    try { content = fs.readFileSync(c.filePath, 'utf8'); } catch { continue; }
+    const parsed = discover.parseSkillMd(content, c.filePath);
+    if (!parsed.name) continue;
+    parsedList.push({
+      filePath: c.filePath,
+      type: c.type,
+      pluginContext: c.pluginContext,
+      parsed,
+    });
+  }
+  return parsedList;
+}
+
 function main() {
   const [, , subcommand, ...args] = process.argv;
 
@@ -269,6 +369,9 @@ function main() {
       }
       case 'step':
         printJson(dispatchStep(args));
+        return;
+      case 'sources':
+        printJson(dispatchSources(args));
         return;
       default:
         process.stderr.write(`Unknown command: ${subcommand}\n${usage()}`);
