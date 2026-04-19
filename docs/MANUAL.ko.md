@@ -28,17 +28,25 @@ Weave는 Claude Code용 에이전트 워크플로우 컴포저. 설치된 Claude
 weave 리포 디렉토리에서:
 
 ```bash
-node install.js
+node install.js                          # 구성된 CLI 자동 감지
+node install.js --target=claude,gemini   # 여러 타겟 명시
+node install.js --dry-run                # 쓰기 없이 미리보기
 ```
 
 복사되는 위치:
 - 런타임 → `~/.weave/bin/` (또는 `$WEAVE_HOME/bin/`)
-- 스킬 → `~/.claude/skills/weave-*/` (13개 슬래시 커맨드)
+- 타겟별 스킬:
+  - `claude` → `~/.claude/skills/weave-*/SKILL.md`
+  - `gemini` → `~/.gemini/commands/weave/*.toml`
+
+`~/.claude/` · `~/.gemini/` 존재 여부로 타겟을 자동 감지. 둘 다 없으면 Claude Code 로 기본 설치.
 
 제거:
 
 ```bash
-rm -rf ~/.weave ~/.claude/skills/weave-*
+rm -rf ~/.weave \
+       ~/.claude/skills/weave-* \
+       ~/.gemini/commands/weave
 ```
 
 업데이트 후 재설치는 `node install.js` 다시 실행 — idempotent.

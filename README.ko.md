@@ -5,7 +5,7 @@
 **Claude Code용 에이전트 워크플로우 컴포저.** 설치된 Claude Code 플러그인에서 스킬을 자동 디스커버해 **재사용 가능한 preset**으로 엮고 step-by-step 실행을 오케스트레이션한다. 세션 상태를 파일시스템에 저장하기 때문에 컨텍스트 compaction·rollback·세션 간 재개가 가능하다.
 
 - **리포:** `/Users/Work/git/claude/skills/weave` (파일시스템만, git 저장소 아님)
-- **지원 CLI:** Claude Code (v1). `gemini-cli` / `copilot` / `codex` / `opencode` 어댑터는 미래 확장 예약.
+- **지원 CLI:** Claude Code ✓, Gemini CLI ✓ (`--target=gemini`). Copilot CLI / Codex CLI / OpenCode 는 향후 릴리즈 예약.
 - **Node:** 18+
 
 ---
@@ -125,13 +125,20 @@ cd weave
 ### 2. 설치 스크립트 실행
 
 ```bash
-node install.js
+node install.js                         # 구성된 모든 CLI 자동 감지
+node install.js --target=claude         # Claude Code 만
+node install.js --target=claude,gemini  # 두 타겟 동시 설치
+node install.js --dry-run               # 쓰기 없이 미리보기
 ```
 
 복사 위치:
 
 - 런타임 → `~/.weave/bin/` (`$WEAVE_HOME` 로 오버라이드 가능)
-- 스킬 → `~/.claude/skills/weave-*/` (슬래시 커맨드 13개)
+- 타겟별 스킬:
+  - `--target=claude` → `~/.claude/skills/weave-*/SKILL.md` (13개)
+  - `--target=gemini` → `~/.gemini/commands/weave/*.toml` (13개)
+
+`--target` 생략 시 `~/.claude/` · `~/.gemini/` 를 감지해 존재하는 CLI 전부에 설치 (하나도 없으면 Claude Code 로 fallback).
 
 설치는 idempotent — 다시 실행해도 안전.
 

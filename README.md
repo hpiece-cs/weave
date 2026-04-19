@@ -5,7 +5,7 @@
 **Agentic workflow composer for Claude Code.** Weave discovers skills installed across your Claude Code plugins, chains them into reusable **workflow presets**, and orchestrates step-by-step execution. Session state lives on the filesystem, so you survive context compaction, rollback, and resume across sessions.
 
 - **Repo:** `/Users/Work/git/claude/skills/weave` (filesystem-only; not a git repo)
-- **Supported CLI:** Claude Code (v1). `gemini-cli` / `copilot` / `codex` / `opencode` are reserved for future adapters.
+- **Supported CLIs:** Claude Code ✓, Gemini CLI ✓ (via `--target=gemini`). Copilot CLI / Codex CLI / OpenCode adapters are reserved for future releases.
 - **Node:** 18+
 
 ---
@@ -125,13 +125,20 @@ cd weave
 ### 2. Run the installer
 
 ```bash
-node install.js
+node install.js                         # auto-detect all configured CLIs
+node install.js --target=claude         # Claude Code only
+node install.js --target=claude,gemini  # both targets at once
+node install.js --dry-run               # preview without writing
 ```
 
 This copies:
 
 - Runtime → `~/.weave/bin/` (override with `$WEAVE_HOME`)
-- Skills → `~/.claude/skills/weave-*/` (13 slash commands)
+- Skills per target:
+  - `--target=claude` → `~/.claude/skills/weave-*/SKILL.md` (13 commands)
+  - `--target=gemini` → `~/.gemini/commands/weave/*.toml` (13 commands)
+
+When `--target` is omitted, the installer probes `~/.claude/` and `~/.gemini/` and installs to every CLI it finds (falling back to Claude Code if none are detected).
 
 The installer is idempotent — rerunning is safe.
 

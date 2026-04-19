@@ -28,17 +28,25 @@ Weave is an agentic workflow composer for Claude Code. It discovers skills insta
 From the weave repo:
 
 ```bash
-node install.js
+node install.js                          # auto-detect configured CLIs
+node install.js --target=claude,gemini   # explicit multi-target
+node install.js --dry-run                # preview only
 ```
 
 Copies:
 - Runtime → `~/.weave/bin/` (or `$WEAVE_HOME/bin/`)
-- Skills → `~/.claude/skills/weave-*/` (13 commands)
+- Per-target skills:
+  - `claude` → `~/.claude/skills/weave-*/SKILL.md`
+  - `gemini` → `~/.gemini/commands/weave/*.toml`
+
+Targets are auto-detected by the presence of `~/.claude/` / `~/.gemini/`. When neither exists, Claude Code is installed as a default.
 
 Uninstall:
 
 ```bash
-rm -rf ~/.weave ~/.claude/skills/weave-*
+rm -rf ~/.weave \
+       ~/.claude/skills/weave-* \
+       ~/.gemini/commands/weave
 ```
 
 To re-install after an update, just run `node install.js` again — idempotent.
