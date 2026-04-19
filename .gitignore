@@ -30,3 +30,9 @@ docs/superpowers/specs/
 scripts/generate-process-workflow.js
 scripts/generate-skill-catalog.js
 scripts/generate-skill-markdown.js
+
+# internal docs (kept private)
+docs/src-notes/
+docs/SKILLS-PROJECT-LIFECYCLE.md
+docs/SKILLS-SUMMARY-TABLE.md
+docs/agentic-workflow-skills.md
