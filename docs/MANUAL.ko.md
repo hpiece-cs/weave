@@ -263,7 +263,7 @@ node ~/.weave/bin/cli.js compose-pick [--session-checked=id1,id2,...]   # /weave
 
 ```
 ~/.weave/
-├── bin/                   ← 런타임 (cli.js + core/ + demo/)
+├── bin/                   ← 런타임 (cli.js + core/)
 ├── workflows/             ← 전역 preset
 └── cache/                 ← 내부 마커
 

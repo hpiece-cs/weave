@@ -230,7 +230,7 @@ rm -rf ~/.weave ~/.claude/skills/weave-* ~/.gemini/commands/weave ~/.config/open
 
 ```
 ~/.weave/
-├── bin/                    ← 런타임 (cli.js + core/ + demo/)
+├── bin/                    ← 런타임 (cli.js + core/)
 ├── workflows/              ← 전역 preset
 └── cache/                  ← 내부 마커
 

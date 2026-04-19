@@ -264,7 +264,7 @@ Edit by hand anytime, or via `/weave:manage`.
 
 ```
 ~/.weave/
-├── bin/                   ← runtime (cli.js + core/ + demo/)
+├── bin/                   ← runtime (cli.js + core/)
 ├── workflows/             ← global presets
 └── cache/                 ← internal markers
 

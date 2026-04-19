@@ -230,7 +230,7 @@ Surfaced on every supported CLI. Claude Code · Gemini CLI use `/weave:*`; openc
 
 ```
 ~/.weave/
-├── bin/                    ← runtime (cli.js + core/ + demo/)
+├── bin/                    ← runtime (cli.js + core/)
 ├── workflows/              ← global presets
 └── cache/                  ← internal markers
 
