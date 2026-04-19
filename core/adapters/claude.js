@@ -25,11 +25,32 @@ function render(skill) {
   };
 }
 
+// Remove every weave-* skill dir under ~/.claude/skills/. Idempotent: returns
+// an empty list when the target dir is missing or has no matching entries.
+function uninstall(home, { dryRun = false } = {}) {
+  const dir = targetDir(home);
+  const removed = [];
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return { removed };
+  }
+  for (const e of entries) {
+    if (!e.isDirectory() || !e.name.startsWith('weave-')) continue;
+    const full = path.join(dir, e.name);
+    if (!dryRun) fs.rmSync(full, { recursive: true, force: true });
+    removed.push(full);
+  }
+  return { removed };
+}
+
 module.exports = {
   name: 'claude',
   label: 'Claude Code',
   detect,
   targetDir,
   render,
+  uninstall,
   requiresBash: true,
 };

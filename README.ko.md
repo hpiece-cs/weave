@@ -2,17 +2,19 @@
 
 > English: [README.md](README.md)
 
-**Claude Code용 에이전트 워크플로우 컴포저.** 설치된 Claude Code 플러그인에서 스킬을 자동 디스커버해 **재사용 가능한 preset**으로 엮고 step-by-step 실행을 오케스트레이션한다. 세션 상태를 파일시스템에 저장하기 때문에 컨텍스트 compaction·rollback·세션 간 재개가 가능하다.
+**에이전트 코딩 CLI 용 워크플로우 컴포저** — Claude Code, opencode, Gemini CLI, Copilot CLI 지원. 설치된 CLI 의 플러그인·익스텐션에서 스킬을 자동 디스커버해 **재사용 가능한 preset**으로 엮고 step-by-step 실행을 오케스트레이션한다. 세션 상태를 파일시스템에 저장하기 때문에 컨텍스트 compaction·rollback·세션 간 재개가 가능하다.
 
-- **리포:** `/Users/Work/git/claude/skills/weave` (파일시스템만, git 저장소 아님)
-- **지원 CLI:** Claude Code ✓, Gemini CLI ✓ (`--target=gemini`). Copilot CLI / Codex CLI / OpenCode 는 향후 릴리즈 예약.
+- **리포:** [github.com/hpiece-cs/weave](https://github.com/hpiece-cs/weave)
+- **지원 CLI:** Claude Code, opencode, Gemini CLI, Copilot CLI
+  - 직접 설치 타겟(`--target=...`): `claude`, `opencode`, `gemini`
+  - Copilot CLI 는 `~/.claude/skills/` 를 읽도록 설계됐기 때문에 `--target=claude` (또는 기본 설치) 만으로 자동으로 노출된다 — 별도 플래그 없음.
 - **Node:** 18+
 
 ---
 
 ## 왜 Weave 인가
 
-Claude Code 생태계에는 이미 **여러 결이 다른 에이전트 워크플로우**가 공존한다 — superpowers, GSD, BMAD, WDS, GDS, 그리고 계속 늘어나는 커스텀 스킬들. 문제는 이들 각각이 **장단점의 묶음**이라는 점이다. 어느 하나도 완벽하지 않고, 어느 하나도 쓸모가 없지 않다.
+에이전트 코딩 생태계에는 이미 **여러 결이 다른 에이전트 워크플로우**가 공존한다 — superpowers, GSD, BMAD, WDS, GDS, 그리고 계속 늘어나는 커스텀 스킬들. 문제는 이들 각각이 **장단점의 묶음**이라는 점이다. 어느 하나도 완벽하지 않고, 어느 하나도 쓸모가 없지 않다.
 
 현실의 프로젝트는 이 중 **어느 하나로도 끝나지 않는다.** 그럼에도 대부분의 도구는 "한 방법론만 쓰세요" 를 전제로 한다. 그 결과 모두가 암묵적으로 여러 방법론을 섞어 쓰면서도, 그 조합을 **재현·공유·감사할 방법이 없다.**
 
@@ -125,26 +127,32 @@ cd weave
 ### 2. 설치 스크립트 실행
 
 ```bash
-node install.js                         # 구성된 모든 CLI 자동 감지
-node install.js --target=claude         # Claude Code 만
-node install.js --target=claude,gemini  # 두 타겟 동시 설치
-node install.js --dry-run               # 쓰기 없이 미리보기
+node install.js                           # 구성된 모든 CLI 자동 감지
+node install.js --target=claude           # Claude Code 만
+node install.js --target=claude,opencode  # 여러 타겟 동시 설치
+node install.js --dry-run                 # 쓰기 없이 미리보기
 ```
 
 복사 위치:
 
 - 런타임 → `~/.weave/bin/` (`$WEAVE_HOME` 로 오버라이드 가능)
 - 타겟별 스킬:
-  - `--target=claude` → `~/.claude/skills/weave-*/SKILL.md` (13개)
-  - `--target=gemini` → `~/.gemini/commands/weave/*.toml` (13개)
+  - `--target=claude` → `~/.claude/skills/weave-*/SKILL.md` → `/weave:*` (13개)
+  - `--target=opencode` → `~/.config/opencode/command/weave-*.md` → `/weave-*` (13개)
+  - `--target=gemini` → `~/.gemini/commands/weave/*.toml` → `/weave:*` (13개)
 
-`--target` 생략 시 `~/.claude/` · `~/.gemini/` 를 감지해 존재하는 CLI 전부에 설치 (하나도 없으면 Claude Code 로 fallback).
+Copilot CLI 는 **claude 타겟에 포함된다**: Copilot 이 설계상 `~/.claude/skills/` 를 스캔하기 때문에 `--target=claude` 설치로 13개 weave 커맨드가 Copilot CLI 에도 `/weave-*` 형태로 그대로 노출된다. 별도의 Copilot 플래그는 없다.
+
+`--target` 생략 시 `~/.claude/` · `~/.gemini/` · `~/.config/opencode/` 를 감지해 존재하는 CLI 전부에 설치 (하나도 없으면 Claude Code 로 fallback).
 
 설치는 idempotent — 다시 실행해도 안전.
 
 ### 3. 확인
 
-Claude Code 에서 `/weave:` 를 입력하면 슬래시 커맨드 13개가 목록에 뜬다.
+CLI 에서 `/weave` 를 입력하면 슬래시 커맨드 13개가 뜬다.
+
+- Claude Code · Gemini CLI → `/weave:<name>` (네임스페이스 지원)
+- opencode · Copilot CLI → `/weave-<name>` (하이픈 — 네임스페이스를 평평하게 편다)
 
 ### 업데이트
 
@@ -157,7 +165,29 @@ node install.js
 ### 제거
 
 ```bash
-rm -rf ~/.weave ~/.claude/skills/weave-*
+node install.js --uninstall                           # 감지된 모든 타겟 + 런타임 제거
+node install.js --uninstall --target=gemini           # 특정 CLI 만 제거 (런타임은 유지)
+node install.js --uninstall --target=claude,opencode  # 여러 CLI 동시 제거
+node install.js --uninstall --dry-run                 # 실제 삭제 없이 미리보기
+```
+
+삭제 범위:
+
+- `--target=claude` → `~/.claude/skills/weave-*/` (Copilot CLI 가 참조하던 경로와 동일 — 같이 사라진다)
+- `--target=opencode` → `~/.config/opencode/command/weave-*.md`
+- `--target=gemini` → `~/.gemini/commands/weave/*.toml` (비워지면 `weave/` 네임스페이스 디렉터리도 제거)
+- `--target` 미지정 → 위 CLI 전부 **+** `~/.weave/bin/` (런타임)
+
+`~/.weave/workflows/` 는 **자동으로 지우지 않는다** — 전역 workflow preset 이 들어있는 사용자 데이터이기 때문. 필요 없으면 직접 삭제:
+
+```bash
+rm -rf ~/.weave/workflows
+```
+
+리포가 이미 없다면 수동 one-liner 로도 가능:
+
+```bash
+rm -rf ~/.weave ~/.claude/skills/weave-* ~/.gemini/commands/weave ~/.config/opencode/command/weave-*.md
 ```
 
 ## 빠른 시작
@@ -178,7 +208,7 @@ rm -rf ~/.weave ~/.claude/skills/weave-*
 
 ## 슬래시 커맨드
 
-전부 `/weave:*` 이름으로 Claude Code 스킬로 노출됨.
+지원 CLI 전부에 노출된다. Claude Code · Gemini CLI 는 `/weave:*`, opencode · Copilot CLI 는 `/weave-*`.
 
 | 커맨드 | 용도 |
 |---|---|

@@ -2,7 +2,7 @@
 
 > 한국어: [MANUAL.ko.md](MANUAL.ko.md)
 
-Weave is an agentic workflow composer for Claude Code. It discovers skills installed across your Claude Code plugins, lets you chain them into reusable **workflow presets**, and orchestrates their execution step-by-step — persisting state to the filesystem so you can survive context compaction, rollback, and resume across sessions.
+Weave is an agentic workflow composer for agentic coding CLIs — Claude Code, opencode, Gemini CLI, and Copilot CLI. It discovers skills installed across your CLI's plugins and extensions, lets you chain them into reusable **workflow presets**, and orchestrates their execution step-by-step — persisting state to the filesystem so you can survive context compaction, rollback, and resume across sessions.
 
 ---
 
@@ -25,31 +25,51 @@ Weave is an agentic workflow composer for Claude Code. It discovers skills insta
 
 ## 1. Install
 
+**Supported CLIs:** Claude Code, opencode, Gemini CLI, Copilot CLI. Codex CLI is not supported (its skill roots don't overlap with any install target).
+
 From the weave repo:
 
 ```bash
-node install.js                          # auto-detect configured CLIs
-node install.js --target=claude,gemini   # explicit multi-target
-node install.js --dry-run                # preview only
+node install.js                                       # auto-detect configured CLIs
+node install.js --target=claude                       # Claude Code only
+node install.js --target=claude,opencode,gemini       # explicit multi-target
+node install.js --dry-run                             # preview only
 ```
 
 Copies:
-- Runtime → `~/.weave/bin/` (or `$WEAVE_HOME/bin/`)
-- Per-target skills:
-  - `claude` → `~/.claude/skills/weave-*/SKILL.md`
-  - `gemini` → `~/.gemini/commands/weave/*.toml`
 
-Targets are auto-detected by the presence of `~/.claude/` / `~/.gemini/`. When neither exists, Claude Code is installed as a default.
+| Target | Writes to | Slash form |
+|---|---|---|
+| `claude` | `~/.claude/skills/weave-*/SKILL.md` | `/weave:<name>` |
+| `opencode` | `~/.config/opencode/command/weave-*.md` | `/weave-<name>` |
+| `gemini` | `~/.gemini/commands/weave/*.toml` | `/weave:<name>` |
 
-Uninstall:
+Plus the runtime → `~/.weave/bin/` (override via `$WEAVE_HOME`).
+
+**Copilot CLI — implicit via claude.** Copilot scans `~/.claude/skills/` at startup, so a `--target=claude` install surfaces the same 13 commands inside Copilot CLI as `/weave-<name>`. There is **no** `--target=copilot` flag; it would be redundant.
+
+Targets are auto-detected by the presence of `~/.claude/`, `~/.config/opencode/`, and `~/.gemini/`. When none are detected, Claude Code is installed as a fallback. Codex CLI has a read-only adapter (used only by discover/detect) and will refuse `--target=codex`.
+
+### Uninstall
 
 ```bash
-rm -rf ~/.weave \
-       ~/.claude/skills/weave-* \
-       ~/.gemini/commands/weave
+node install.js --uninstall                           # remove every detected CLI + ~/.weave/bin/
+node install.js --uninstall --target=gemini           # remove one CLI (runtime stays)
+node install.js --uninstall --target=claude,opencode  # remove several
+node install.js --uninstall --dry-run                 # preview
 ```
 
-To re-install after an update, just run `node install.js` again — idempotent.
+Removal scope per target:
+
+| Target | What gets deleted |
+|---|---|
+| `claude` | `~/.claude/skills/weave-*/` (this is the same path Copilot CLI reads — Copilot loses the commands too) |
+| `opencode` | `~/.config/opencode/command/weave-*.md` |
+| `gemini` | `~/.gemini/commands/weave/*.toml` + the empty `weave/` namespace dir |
+
+`~/.weave/workflows/` is **never** removed automatically — it holds your saved global presets. Delete manually (`rm -rf ~/.weave/workflows`) only if you want those gone.
+
+To re-install after an update, run `node install.js` again — it's idempotent.
 
 ## 2. Core concepts
 
@@ -65,7 +85,7 @@ To re-install after an update, just run `node install.js` again — idempotent.
 
 ## 3. Command reference
 
-All commands are slash commands in Claude Code.
+All commands are exposed as slash commands on every supported CLI. Claude Code and Gemini CLI render them as `/weave:<name>` (namespace-aware); opencode and Copilot CLI render them as `/weave-<name>` (flat menu).
 
 | Command | Purpose |
 |---|---|
@@ -97,7 +117,7 @@ All commands are slash commands in Claude Code.
 - Navigate with `Up`/`Down` (or `PageUp`/`PageDown` to jump 10 rows); `+`/`-` (or `Right`/`Left`) expand/collapse a phase group — `Left` on a skill row jumps back to its parent template; `Space` or `Enter` toggles a skill (or activates `SAVE`/`QUIT`); `a` toggles-all in the focused group; `r` reloads the skill list (ignores cache — useful after installing/removing plugins); `s` jumps to the `SAVE` action; `q` or `Ctrl+C` quits without saving.
 - `Enter` on `SAVE` → asks for preset name + scope (`project` default).
 - If name conflicts in that scope: choose `overwrite` / `rename` / `cancel`.
-- Window closes automatically; Claude Code shows `✓ Saved preset X`.
+- Window closes automatically; your CLI shows `✓ Saved preset X`.
 
 **Locale.** The picker, status messages, prompts, and phase descriptions follow `$LANG` — Korean (`ko_*`) or English (default). The cache invalidates automatically when the locale changes, so switching terminals between languages always shows the right strings.
 

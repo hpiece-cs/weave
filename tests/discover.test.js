@@ -185,6 +185,58 @@ description: Project-overridden. Create a PRD from scratch with project-specific
 Overridden body with plan and implement.
 `
   );
+
+  // Copilot CLI — home ~/.copilot/skills/
+  writeFile(
+    path.join(TEST_HOME, '.copilot', 'skills', 'gsd-copilot-home', 'SKILL.md'),
+    `---
+name: gsd-copilot-home
+description: Create phase plan with verification. Execute tests and implement the feature.
+---
+Body.
+`
+  );
+  // Copilot CLI — project .github/skills/
+  writeFile(
+    path.join(TEST_CWD, '.github', 'skills', 'gsd-copilot-project', 'SKILL.md'),
+    `---
+name: gsd-copilot-project
+description: Execute the phase plan and generate implementation.
+---
+Body.
+`
+  );
+
+  // Codex — home ~/.codex/skills/ (deprecated)
+  writeFile(
+    path.join(TEST_HOME, '.codex', 'skills', 'gsd-codex-home', 'SKILL.md'),
+    `---
+name: gsd-codex-home
+description: Create the implementation plan for a phase and execute each story.
+---
+Body.
+`
+  );
+  // Vendor-neutral — home ~/.agents/skills/ (shared: codex + opencode + copilot)
+  writeFile(
+    path.join(TEST_HOME, '.agents', 'skills', 'gsd-agents-home', 'SKILL.md'),
+    `---
+name: gsd-agents-home
+description: Create verification plan and implement the quality checks.
+---
+Body.
+`
+  );
+  // Vendor-neutral — project <cwd>/.agents/skills/
+  writeFile(
+    path.join(TEST_CWD, '.agents', 'skills', 'gsd-agents-project', 'SKILL.md'),
+    `---
+name: gsd-agents-project
+description: Create project-scope verification plan and execute the feature.
+---
+Body.
+`
+  );
 });
 
 after(() => {
@@ -462,6 +514,19 @@ test('23. extractSource home-skill "bmad-cis-*" → "bmad-cis" (longer prefix wi
   assert.strictEqual(src, 'bmad-cis');
 });
 
+test('24a. extractSource command-flat (opencode native): "/config/opencode/command/gsd-new-workspace.md" → "gsd"', () => {
+  // Regression: registry once derived "command" as a cluster from this dir.
+  // Seed prefixes must win over registry so baseName match returns "gsd".
+  const src = discover.extractSource(
+    '/home/x/.config/opencode/command/gsd-new-workspace.md',
+    'home-skill',
+    { registry: { assignments: {
+      '/home/x/.config/opencode/command/gsd-new-workspace.md': { source: 'command', signal: 'derivation' },
+    } } }
+  );
+  assert.strictEqual(src, 'gsd');
+});
+
 test('24. extractSource home-skill "agent-settings" (no whitelist) → full dir name', () => {
   const src = discover.extractSource(
     '/home/x/.claude/skills/agent-settings/SKILL.md', 'home-skill'
@@ -525,6 +590,69 @@ test('27. discoverAll(workflowOnly=true) returns expected filtered skills', () =
   const overridden = skills.find((s) => s.id === 'bmad:create-prd');
   assert.strictEqual(overridden.rank, 1);
   assert.ok(overridden.path.startsWith(TEST_CWD));
+});
+
+test('27c. discoverAll(cli:"claude") ignores codex/copilot/opencode paths', () => {
+  const skills = discover.discoverAll({
+    workflowOnly: true,
+    homeDir: TEST_HOME,
+    cwd: TEST_CWD,
+    cli: 'claude',
+  });
+  const ids = skills.map((s) => s.id);
+  // Claude scoping — includes claude paths
+  assert.ok(ids.includes('bmad:create-prd'), 'claude home-skill visible');
+  assert.ok(ids.includes('gsd:plan-phase'), 'claude home-command visible');
+  assert.ok(ids.includes('fake-plugin:plug-workflow'), 'claude plugin visible');
+  // Does NOT include paths exclusive to other CLIs
+  assert.ok(!ids.includes('gsd:copilot-home'),    'copilot home path excluded');
+  assert.ok(!ids.includes('gsd:copilot-project'), 'copilot project path excluded');
+  assert.ok(!ids.includes('gsd:codex-home'),      'codex home path excluded');
+  assert.ok(!ids.includes('gsd:agents-home'),     'agents home path excluded under claude cli');
+});
+
+test('27d. discoverAll(cli:"copilot") scans .copilot + .github only (no .claude/.agents crossover)', () => {
+  const skills = discover.discoverAll({
+    workflowOnly: true,
+    homeDir: TEST_HOME,
+    cwd: TEST_CWD,
+    cli: 'copilot',
+  });
+  const ids = skills.map((s) => s.id);
+  assert.ok(ids.includes('gsd:copilot-home'),    'copilot home-skill visible');
+  assert.ok(ids.includes('gsd:copilot-project'), 'copilot project-skill visible');
+  assert.ok(!ids.includes('bmad:create-prd'),    'no .claude crossover (scoped to native roots)');
+  assert.ok(!ids.includes('gsd:agents-home'),    'no .agents crossover (scoped to native roots)');
+});
+
+test('27e. discoverAll(cli:"codex") skips .claude — no crossover', () => {
+  const skills = discover.discoverAll({
+    workflowOnly: true,
+    homeDir: TEST_HOME,
+    cwd: TEST_CWD,
+    cli: 'codex',
+  });
+  const ids = skills.map((s) => s.id);
+  assert.ok(ids.includes('gsd:codex-home'),     'codex home-skill visible');
+  assert.ok(ids.includes('gsd:agents-home'),    'agents home crossover');
+  assert.ok(ids.includes('gsd:agents-project'), 'agents project crossover');
+  assert.ok(!ids.includes('bmad:create-prd'),   'no .claude crossover for codex');
+  assert.ok(!ids.includes('gsd:plan-phase'),    'no claude commands for codex');
+});
+
+test('27f. discoverAll(cli:"all") scans copilot + codex + vendor-neutral paths across CLIs', () => {
+  const skills = discover.discoverAll({
+    workflowOnly: true,
+    homeDir: TEST_HOME,
+    cwd: TEST_CWD,
+    cli: 'all',
+  });
+  const ids = skills.map((s) => s.id);
+  assert.ok(ids.includes('gsd:copilot-home'), '~/.copilot/skills picked up');
+  assert.ok(ids.includes('gsd:copilot-project'), '<cwd>/.github/skills picked up');
+  assert.ok(ids.includes('gsd:codex-home'), '~/.codex/skills picked up');
+  assert.ok(ids.includes('gsd:agents-home'), '~/.agents/skills picked up');
+  assert.ok(ids.includes('gsd:agents-project'), '<cwd>/.agents/skills picked up');
 });
 
 test('28. discoverAll(workflowOnly=false) skips filter, returns all valid', () => {

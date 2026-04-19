@@ -2,17 +2,19 @@
 
 > 한국어: [README.ko.md](README.ko.md)
 
-**Agentic workflow composer for Claude Code.** Weave discovers skills installed across your Claude Code plugins, chains them into reusable **workflow presets**, and orchestrates step-by-step execution. Session state lives on the filesystem, so you survive context compaction, rollback, and resume across sessions.
+**Agentic workflow composer for agentic coding CLIs** — Claude Code, opencode, Gemini CLI, and Copilot CLI. Weave discovers skills installed across your CLI's plugins and extensions, chains them into reusable **workflow presets**, and orchestrates step-by-step execution. Session state lives on the filesystem, so you survive context compaction, rollback, and resume across sessions.
 
-- **Repo:** `/Users/Work/git/claude/skills/weave` (filesystem-only; not a git repo)
-- **Supported CLIs:** Claude Code ✓, Gemini CLI ✓ (via `--target=gemini`). Copilot CLI / Codex CLI / OpenCode adapters are reserved for future releases.
+- **Repo:** [github.com/hpiece-cs/weave](https://github.com/hpiece-cs/weave)
+- **Supported CLIs:** Claude Code, opencode, Gemini CLI, Copilot CLI
+  - Direct install targets (`--target=...`): `claude`, `opencode`, `gemini`
+  - Copilot CLI reads `~/.claude/skills/`, so `--target=claude` (or the default install) serves it automatically — no separate flag needed.
 - **Node:** 18+
 
 ---
 
 ## Why Weave
 
-The Claude Code ecosystem already hosts **several agentic workflows with distinct flavors** — superpowers, GSD, BMAD, WDS, GDS, and a growing long tail of custom skills. Each one is a **bundle of tradeoffs**: none is perfect, none is useless.
+The agentic-coding ecosystem already hosts **several agentic workflows with distinct flavors** — superpowers, GSD, BMAD, WDS, GDS, and a growing long tail of custom skills. Each one is a **bundle of tradeoffs**: none is perfect, none is useless.
 
 Real projects **never fit inside just one of them.** Yet most tooling assumes you've picked a camp. So everyone ends up mixing methodologies informally — with no way to reproduce, share, or audit the blend.
 
@@ -125,26 +127,32 @@ cd weave
 ### 2. Run the installer
 
 ```bash
-node install.js                         # auto-detect all configured CLIs
-node install.js --target=claude         # Claude Code only
-node install.js --target=claude,gemini  # both targets at once
-node install.js --dry-run               # preview without writing
+node install.js                          # auto-detect all configured CLIs
+node install.js --target=claude          # Claude Code only
+node install.js --target=claude,opencode # multiple targets at once
+node install.js --dry-run                # preview without writing
 ```
 
 This copies:
 
 - Runtime → `~/.weave/bin/` (override with `$WEAVE_HOME`)
 - Skills per target:
-  - `--target=claude` → `~/.claude/skills/weave-*/SKILL.md` (13 commands)
-  - `--target=gemini` → `~/.gemini/commands/weave/*.toml` (13 commands)
+  - `--target=claude` → `~/.claude/skills/weave-*/SKILL.md` → `/weave:*` (13 commands)
+  - `--target=opencode` → `~/.config/opencode/command/weave-*.md` → `/weave-*` (13 commands)
+  - `--target=gemini` → `~/.gemini/commands/weave/*.toml` → `/weave:*` (13 commands)
 
-When `--target` is omitted, the installer probes `~/.claude/` and `~/.gemini/` and installs to every CLI it finds (falling back to Claude Code if none are detected).
+Copilot CLI is **covered by the claude target**: Copilot scans `~/.claude/skills/` by design, so a `--target=claude` install automatically surfaces the 13 weave commands inside Copilot CLI as `/weave-*`. No separate Copilot flag exists.
+
+When `--target` is omitted, the installer probes `~/.claude/`, `~/.gemini/`, and `~/.config/opencode/` and installs to every CLI it finds (falling back to Claude Code if none are detected).
 
 The installer is idempotent — rerunning is safe.
 
 ### 3. Verify
 
-Open Claude Code and type `/weave:` — the 13 slash commands should appear in the command list.
+Open your CLI and type `/weave` — the 13 slash commands should appear.
+
+- Claude Code · Gemini CLI → `/weave:<name>` (namespace support)
+- opencode · Copilot CLI → `/weave-<name>` (hyphen — these surfaces flatten the namespace)
 
 ### Update
 
@@ -157,7 +165,29 @@ node install.js
 ### Uninstall
 
 ```bash
-rm -rf ~/.weave ~/.claude/skills/weave-*
+node install.js --uninstall                           # remove every detected target + runtime
+node install.js --uninstall --target=gemini           # remove one CLI only (runtime stays)
+node install.js --uninstall --target=claude,opencode  # remove several CLIs
+node install.js --uninstall --dry-run                 # preview what would be removed
+```
+
+What gets removed:
+
+- `--target=claude` → `~/.claude/skills/weave-*/` (this also removes the commands Copilot CLI was reading — single source)
+- `--target=opencode` → `~/.config/opencode/command/weave-*.md`
+- `--target=gemini` → `~/.gemini/commands/weave/*.toml` (+ the empty `weave/` namespace dir)
+- No `--target` → every detected CLI above **plus** `~/.weave/bin/` (the runtime)
+
+`~/.weave/workflows/` is **never** removed automatically — it holds your global workflow presets. Delete manually if you no longer need them:
+
+```bash
+rm -rf ~/.weave/workflows
+```
+
+If the repo is gone, a one-liner still works:
+
+```bash
+rm -rf ~/.weave ~/.claude/skills/weave-* ~/.gemini/commands/weave ~/.config/opencode/command/weave-*.md
 ```
 
 ## Quick start
@@ -178,7 +208,7 @@ rm -rf ~/.weave ~/.claude/skills/weave-*
 
 ## Slash commands
 
-All exposed as Claude Code skills under `/weave:*`.
+Surfaced on every supported CLI. Claude Code · Gemini CLI use `/weave:*`; opencode · Copilot CLI use `/weave-*`.
 
 | Command | Purpose |
 |---|---|

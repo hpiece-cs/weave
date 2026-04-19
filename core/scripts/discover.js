@@ -11,6 +11,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const sourceRegistry = require('./source-registry.js');
+const geminiAdapter = require('../adapters/gemini.js');
+const { detectRunningCli } = require('./cli-detect.js');
 
 // ── Known prefixes (longest first for correct matching) ──
 const KNOWN_PREFIXES = [
@@ -539,14 +541,68 @@ function readInstalledPlugins(homeDir) {
   return out;
 }
 
+// expandGeminiExtensions — enumerate ~/.gemini/extensions/<ext>/{skills,commands}/
+// into concrete specs so the caller doesn't have to care that Gemini extensions
+// nest skills/commands under a per-extension directory.
+function expandGeminiExtensions(extRoot, type) {
+  const specs = [];
+  let entries;
+  try {
+    entries = fs.readdirSync(extRoot, { withFileTypes: true });
+  } catch {
+    return specs;
+  }
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name.startsWith('.') || e.name.startsWith('_')) continue;
+    const extDir = path.join(extRoot, e.name);
+    const skillsDir = path.join(extDir, 'skills');
+    const cmdDir = path.join(extDir, 'commands');
+    if (fs.existsSync(skillsDir)) {
+      specs.push({ type, root: skillsDir });
+    }
+    if (fs.existsSync(cmdDir)) {
+      // Extension commands are flat MD (description + body, no `name:` frontmatter).
+      specs.push({ type, root: cmdDir, scan: 'command-flat', nameFromFilename: true });
+    }
+  }
+  return specs;
+}
+
 // ──────────────────────────── scanning ───────────────────────────
+//
+// Spec shape:
+//   { type, root, scan?, parse?, nameFromFilename?, pluginContext? }
+//
+// `type`  — used for RANK/dedup priority. One of home-skill/project-skill/
+//           plugin-skill/home-command/project-command/plugin-command.
+// `scan`  — optional: which enumeration primitive to use. Defaults based on type.
+//   * 'skill-dir'       — <root>/<name>/SKILL.md  (default for *-skill)
+//   * 'command-ns'      — <root>/<ns>/<name>.md  (default for home/project-command)
+//   * 'plugin-commands' — <root>/commands/*.md   (default for plugin-command)
+//   * 'command-flat'    — <root>/*.md             (opencode native, extension commands)
+//   * 'command-toml-ns' — <root>/<ns>/<name>.toml (gemini commands)
+// `parse` / `nameFromFilename` — forwarded onto every candidate this spec yields,
+// so per-CLI format quirks stay attached to the file they describe.
+
+function defaultScanForType(type) {
+  switch (type) {
+    case 'plugin-command':
+      return 'plugin-commands';
+    case 'home-command':
+    case 'project-command':
+      return 'command-ns';
+    default:
+      return 'skill-dir';
+  }
+}
 
 function scanLocation(spec) {
   const out = [];
-  switch (spec.type) {
-    case 'home-skill':
-    case 'project-skill':
-    case 'plugin-skill': {
+  const scan = spec.scan || defaultScanForType(spec.type);
+  switch (scan) {
+    case 'skill-dir': {
+      // plugin-skill has an extra /skills/ segment before the per-skill dirs;
+      // all other *-skill specs pass the skills root directly.
       const skillsRoot = spec.type === 'plugin-skill'
         ? path.join(spec.root, 'skills')
         : spec.root;
@@ -567,8 +623,7 @@ function scanLocation(spec) {
       }
       break;
     }
-    case 'home-command':
-    case 'project-command': {
+    case 'command-ns': {
       for (const source of listDir(spec.root)) {
         if (source.startsWith('_') || source.startsWith('.')) continue;
         const sub = path.join(spec.root, source);
@@ -585,7 +640,7 @@ function scanLocation(spec) {
       }
       break;
     }
-    case 'plugin-command': {
+    case 'plugin-commands': {
       const cmdRoot = path.join(spec.root, 'commands');
       for (const fname of listDir(cmdRoot)) {
         if (!fname.endsWith('.md')) continue;
@@ -601,6 +656,40 @@ function scanLocation(spec) {
       }
       break;
     }
+    case 'command-flat': {
+      for (const fname of listDir(spec.root)) {
+        if (fname.startsWith('.') || fname.startsWith('_')) continue;
+        if (!fname.endsWith('.md') || fname === 'SKILL.md') continue;
+        const file = path.join(spec.root, fname);
+        const fst = statOrNull(file);
+        if (fst && fst.isFile()) {
+          out.push({ type: spec.type, filePath: file });
+        }
+      }
+      break;
+    }
+    case 'command-toml-ns': {
+      for (const source of listDir(spec.root)) {
+        if (source.startsWith('_') || source.startsWith('.')) continue;
+        const sub = path.join(spec.root, source);
+        const s = statOrNull(sub);
+        if (!s || !s.isDirectory()) continue;
+        for (const fname of listDir(sub)) {
+          if (!fname.endsWith('.toml')) continue;
+          const file = path.join(sub, fname);
+          const fst = statOrNull(file);
+          if (fst && fst.isFile()) {
+            out.push({ type: spec.type, filePath: file });
+          }
+        }
+      }
+      break;
+    }
+  }
+  // Forward per-spec format hints onto every candidate it produced.
+  for (const c of out) {
+    if (spec.parse) c.parse = spec.parse;
+    if (spec.nameFromFilename) c.nameFromFilename = true;
   }
   return out;
 }
@@ -708,19 +797,29 @@ function extractSource(filePath, type, context) {
   if (type === 'home-command' || type === 'project-command') {
     return path.basename(path.dirname(filePath));
   }
-  // home-skill / project-skill
-  // Priority 1 — source registry (authoritative in the 2-pass discoverAll flow).
+  // home-skill / project-skill. Two layouts can appear under these types:
+  //   skill-dir:    <root>/<prefix>-<name>/SKILL.md  → prefix is in dirname
+  //   command-flat: <root>/<prefix>-<name>.md        → prefix is in filename
+  //
+  // Seed prefixes beat the source-registry lookup here. The registry can
+  // derive noisy clusters from common parent directory names (e.g. every file
+  // under ~/.config/opencode/command/ shares that parent, so derivation once
+  // learned "command" as a prefix); curated KNOWN_PREFIXES are never wrong.
+  const dirName = path.basename(path.dirname(filePath));
+  const baseName = path.basename(filePath, path.extname(filePath));
+  const extra = (context && context.customSourcePrefixes) || [];
+  const seeds = [...extra, ...KNOWN_PREFIXES].sort((a, b) => b.length - a.length);
+  for (const candidate of [dirName, baseName]) {
+    for (const p of seeds) {
+      if (candidate === p || candidate.startsWith(`${p}-`)) return p;
+    }
+  }
+  // Registry — covers derived clusters for unknown methodologies not in seed.
   if (context && context.registry) {
     const resolved = sourceRegistry.resolveSource(filePath, context.registry);
     if (resolved) return resolved;
   }
-  // Fallback — seed prefix match (legacy path: direct callers & tests).
-  const dirName = path.basename(path.dirname(filePath));
-  const extra = (context && context.customSourcePrefixes) || [];
-  const all = [...extra, ...KNOWN_PREFIXES].sort((a, b) => b.length - a.length);
-  for (const p of all) {
-    if (dirName === p || dirName.startsWith(`${p}-`)) return p;
-  }
+  // Last resort — use the parent dirname verbatim (legacy behavior).
   return dirName;
 }
 
@@ -765,6 +864,7 @@ function dedupByPriority(skills, { debug = false } = {}) {
 // ───────────────────────── discoverAll ───────────────────────────
 
 // 2-pass discoverAll:
+//   Pass 0 — resolve active CLI (env or options.cli) → pick adapter(s) → collect specs.
 //   Pass 1 — scan + parse, collect {candidate, parsed}.
 //   Derivation — source-registry.js: seed + trie boundaries + append-only registry.
 //   Pass 2 — assign source (via registry) + classify (pure) + 30-stage + assemble.
@@ -777,20 +877,92 @@ function discoverAll(options = {}) {
     customSourcePrefixes,
     minClusterSize = 2,
     persistRegistry = true,
+    cli,
   } = options;
   const home = homeDir || os.homedir();
   const cwdPath = cwd || process.cwd();
 
+  // Pass 0 — CLI resolution + per-CLI path list. `cli` option overrides env
+  // detection. `'all'` scans every CLI's effective roots (legacy / cross-CLI
+  // composition). Unknown name falls through to 'claude' via detectRunningCli.
+  //
+  // Each branch below declares the EFFECTIVE ROOTS that CLI reads at runtime —
+  // i.e. the paths visible in that CLI session, including cross-CLI paths
+  // (opencode reads ~/.claude/skills, copilot reads .claude + .agents, etc.).
+  const resolvedCli = cli || detectRunningCli();
+  const includeAll = resolvedCli === 'all';
   const specs = [];
-  const plugins = readInstalledPlugins(home);
-  for (const p of plugins) {
-    specs.push({ type: 'plugin-skill', root: p.installPath, pluginContext: p });
-    specs.push({ type: 'plugin-command', root: p.installPath, pluginContext: p });
+
+  if (includeAll || resolvedCli === 'claude') {
+    // Claude Code — plugins (from installed_plugins.json) + home/project skills + commands
+    for (const p of readInstalledPlugins(home)) {
+      specs.push({ type: 'plugin-skill',   root: p.installPath, pluginContext: p });
+      specs.push({ type: 'plugin-command', root: p.installPath, pluginContext: p });
+    }
+    specs.push({ type: 'home-skill',      root: path.join(home, '.claude', 'skills') });
+    specs.push({ type: 'home-command',    root: path.join(home, '.claude', 'commands') });
+    specs.push({ type: 'project-skill',   root: path.join(cwdPath, '.claude', 'skills') });
+    specs.push({ type: 'project-command', root: path.join(cwdPath, '.claude', 'commands') });
   }
-  specs.push({ type: 'home-skill', root: path.join(home, '.claude', 'skills') });
-  specs.push({ type: 'home-command', root: path.join(home, '.claude', 'commands') });
-  specs.push({ type: 'project-skill', root: path.join(cwdPath, '.claude', 'skills') });
-  specs.push({ type: 'project-command', root: path.join(cwdPath, '.claude', 'commands') });
+
+  if (includeAll || resolvedCli === 'opencode') {
+    // opencode — native command files (flat MD) + native skills dirs + cross-CLI reads
+    // Authoritative: opencode/packages/opencode/src/skill/index.ts (EXTERNAL_DIRS).
+    specs.push({ type: 'home-skill',    root: path.join(home, '.config', 'opencode', 'command'),  scan: 'command-flat', nameFromFilename: true });
+    specs.push({ type: 'home-skill',    root: path.join(home, '.config', 'opencode', 'commands'), scan: 'command-flat', nameFromFilename: true });
+    specs.push({ type: 'home-skill',    root: path.join(home, '.config', 'opencode', 'skill') });
+    specs.push({ type: 'home-skill',    root: path.join(home, '.config', 'opencode', 'skills') });
+    // specs.push({ type: 'home-skill',    root: path.join(home, '.claude', 'skills') });
+    // specs.push({ type: 'home-skill',    root: path.join(home, '.agents', 'skills') });
+    specs.push({ type: 'project-skill', root: path.join(cwdPath, '.opencode', 'command'),  scan: 'command-flat', nameFromFilename: true });
+    specs.push({ type: 'project-skill', root: path.join(cwdPath, '.opencode', 'commands'), scan: 'command-flat', nameFromFilename: true });
+    specs.push({ type: 'project-skill', root: path.join(cwdPath, '.opencode', 'skill') });
+    specs.push({ type: 'project-skill', root: path.join(cwdPath, '.opencode', 'skills') });
+    // specs.push({ type: 'project-skill', root: path.join(cwdPath, '.claude', 'skills') });
+    // specs.push({ type: 'project-skill', root: path.join(cwdPath, '.agents', 'skills') });
+  }
+
+  if (includeAll || resolvedCli === 'codex') {
+    // Codex — ~/.codex/skills (deprecated but still read) + ~/.agents/skills (primary).
+    // Does NOT read ~/.claude/skills.
+    specs.push({ type: 'home-skill',    root: path.join(home, '.codex', 'skills') });
+    specs.push({ type: 'home-skill',    root: path.join(home, '.agents', 'skills') });
+    specs.push({ type: 'project-skill', root: path.join(cwdPath, '.agents', 'skills') });
+  }
+
+  if (includeAll || resolvedCli === 'copilot') {
+    // Copilot CLI — all three user paths + all three project paths
+    specs.push({ type: 'home-skill',    root: path.join(home, '.copilot', 'skills') });
+    // specs.push({ type: 'home-skill',    root: path.join(home, '.claude', 'skills') });
+    // specs.push({ type: 'home-skill',    root: path.join(home, '.agents', 'skills') });
+    specs.push({ type: 'project-skill', root: path.join(cwdPath, '.github', 'skills') });
+    // specs.push({ type: 'project-skill', root: path.join(cwdPath, '.claude', 'skills') });
+    // specs.push({ type: 'project-skill', root: path.join(cwdPath, '.agents', 'skills') });
+  }
+
+  if (includeAll || resolvedCli === 'gemini') {
+    // Gemini CLI — native skills + TOML commands + extension skills/commands + crossover
+    specs.push({ type: 'home-skill', root: path.join(home, '.gemini', 'skills') });
+    // specs.push({ type: 'home-skill', root: path.join(home, '.agents', 'skills') });
+    specs.push({
+      type: 'home-skill',
+      root: path.join(home, '.gemini', 'commands'),
+      scan: 'command-toml-ns',
+      parse: geminiAdapter.parseGeminiToml,
+      nameFromFilename: true,
+    });
+    specs.push(...expandGeminiExtensions(path.join(home, '.gemini', 'extensions'), 'home-skill'));
+    specs.push({ type: 'project-skill', root: path.join(cwdPath, '.gemini', 'skills') });
+    // specs.push({ type: 'project-skill', root: path.join(cwdPath, '.agents', 'skills') });
+    specs.push({
+      type: 'project-skill',
+      root: path.join(cwdPath, '.gemini', 'commands'),
+      scan: 'command-toml-ns',
+      parse: geminiAdapter.parseGeminiToml,
+      nameFromFilename: true,
+    });
+    specs.push(...expandGeminiExtensions(path.join(cwdPath, '.gemini', 'extensions'), 'project-skill'));
+  }
 
   const candidates = [];
   for (const spec of specs) {
@@ -806,7 +978,11 @@ function discoverAll(options = {}) {
     } catch {
       continue;
     }
-    const parsed = parseSkillMd(content, c.filePath);
+    const parseFn = c.parse || parseSkillMd;
+    const parsed = parseFn(content, c.filePath);
+    if (!parsed.name && c.nameFromFilename) {
+      parsed.name = path.basename(c.filePath, path.extname(c.filePath));
+    }
     if (!parsed.name) {
       if (debug) process.stderr.write(`skipped: no name in ${c.filePath}\n`);
       continue;
@@ -922,7 +1098,9 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const workflowOnly = !args.includes('--all');
   const debug = args.includes('--debug');
-  const result = discoverAll({ workflowOnly, debug });
+  const cliFlag = args.find((a) => a.startsWith('--cli='));
+  const cli = cliFlag ? cliFlag.slice('--cli='.length) : undefined;
+  const result = discoverAll({ workflowOnly, debug, cli });
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 }
 

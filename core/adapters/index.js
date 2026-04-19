@@ -11,6 +11,12 @@
 //   render(skill): {filename, content}
 //                                   — filename is relative to targetDir
 //                                   — content is the full file bytes
+//   uninstall(home, {dryRun}): {removed: string[]}
+//                                   — remove every file/dir this adapter would
+//                                     have written under targetDir(home).
+//                                     Must be idempotent; missing target is OK.
+//                                     Must not touch entries outside the weave
+//                                     prefix/namespace.
 //   requiresBash: boolean           — adapter metadata: does the CLI execute bash in slash cmds?
 //                                     (used to pick fallback rendering in future adapters)
 //
@@ -29,10 +35,16 @@ const os = require('node:os');
 
 const claude = require('./claude.js');
 const gemini = require('./gemini.js');
+const opencode = require('./opencode.js');
+const codex = require('./codex.js');
+const copilot = require('./copilot.js');
 
 const REGISTRY = {
   claude,
   gemini,
+  opencode,
+  codex,
+  copilot,
 };
 
 function getAdapter(name) {

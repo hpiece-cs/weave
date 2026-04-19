@@ -29,6 +29,53 @@ function targetDir(home) {
   return path.join(home, '.gemini', 'commands');
 }
 
+// ─────────── TOML mini-parser ────────────────────────────────
+// Handles the subset weave's install.js emits plus common user formats:
+//   description = "..."          (basic double-quoted)
+//   prompt = '''...'''           (literal multi-line)
+//   prompt = """..."""           (basic multi-line, with escapes)
+// Full TOML (arrays, tables, inline tables, etc.) is NOT supported.
+// Returns a shape compatible with parseSkillMd's output.
+
+function unescapeBasic(s) {
+  // Order matters: handle \\ first via placeholder so later replacements don't re-escape.
+  return s
+    .replace(/\\\\/g, '\x00')
+    .replace(/\\"/g, '"')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\x00/g, '\\');
+}
+
+function extractBasicString(content, key) {
+  const m = content.match(new RegExp(`^${key}\\s*=\\s*"((?:\\\\.|[^"\\\\])*)"\\s*$`, 'm'));
+  return m ? unescapeBasic(m[1]) : '';
+}
+
+function extractMultilineString(content, key) {
+  // Prefer literal (triple-single) — no escapes
+  const lit = content.match(new RegExp(`^${key}\\s*=\\s*'''\\r?\\n?([\\s\\S]*?)'''`, 'm'));
+  if (lit) return lit[1];
+  const basic = content.match(new RegExp(`^${key}\\s*=\\s*"""\\r?\\n?([\\s\\S]*?)"""`, 'm'));
+  if (basic) return unescapeBasic(basic[1]);
+  return '';
+}
+
+// parseGeminiToml — convert a Gemini TOML command file to ParsedSkill shape.
+// Gemini TOML commands have no `name:` — the caller supplies it from filename.
+function parseGeminiToml(content /*, filePath */) {
+  const description = extractBasicString(content, 'description');
+  const body = extractMultilineString(content, 'prompt');
+  return {
+    name: '',          // filename fallback in discoverAll
+    description,
+    body,
+    frontmatter: '',
+  };
+}
+
+
 // TOML literal string cannot contain '''; fall back to basic string with escapes.
 function encodePrompt(body) {
   if (!body.includes("'''")) {
@@ -70,11 +117,40 @@ function render(skill) {
   };
 }
 
+// Remove every *.toml under ~/.gemini/commands/weave/, then rmdir the namespace
+// if it's empty. Idempotent — missing dir is fine.
+function uninstall(home, { dryRun = false } = {}) {
+  const nsDir = path.join(targetDir(home), 'weave');
+  const removed = [];
+  let entries;
+  try {
+    entries = fs.readdirSync(nsDir, { withFileTypes: true });
+  } catch {
+    return { removed };
+  }
+  for (const e of entries) {
+    if (!e.isFile() || !e.name.endsWith('.toml')) continue;
+    const full = path.join(nsDir, e.name);
+    if (!dryRun) fs.unlinkSync(full);
+    removed.push(full);
+  }
+  if (!dryRun) {
+    try {
+      fs.rmdirSync(nsDir);
+    } catch {
+      /* non-empty or missing — leave alone */
+    }
+  }
+  return { removed };
+}
+
 module.exports = {
   name: 'gemini',
   label: 'Gemini CLI',
   detect,
   targetDir,
   render,
+  uninstall,
+  parseGeminiToml,
   requiresBash: true,      // Gemini invokes its Shell tool when prompted
 };
