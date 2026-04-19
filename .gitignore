@@ -17,3 +17,16 @@ node_modules/
 .vscode/
 .idea/
 *.swp
+
+# personal install-watch config (absolute path included)
+.weave-install-config
+
+# internal dev tooling (kept private)
+install-watch.js
+INSTALLATION-GUIDE.md
+INSTALLATION-GUIDE.ko.md
+docs/superpowers/plans/
+docs/superpowers/specs/
+scripts/generate-process-workflow.js
+scripts/generate-skill-catalog.js
+scripts/generate-skill-markdown.js
