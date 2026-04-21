@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { CACHE_DIR } = require('./paths.js');
+const paths = require('./paths.js');
 const discover = require('./discover.js');
 const sourceRegistry = require('./source-registry.js');
 
@@ -14,13 +14,16 @@ const sourceRegistry = require('./source-registry.js');
 //   v2 → v3: fingerprint 구성을 source-registry.json 의 derivedPrefixes 로부터
 //             동적으로 계산. 하드코딩된 homeSkillSources 제거.
 const CACHE_SCHEMA_VERSION = 3;
-const CACHE_FILE = path.join(CACHE_DIR, 'skill-groups.json');
+
+function getCachePath(projectRoot) {
+  return path.join(paths.projectCacheDir(projectRoot), 'skill-groups.json');
+}
 
 // v3 — registry-driven fingerprint.
 // Groups registry assignments by source; for each source aggregates file count +
 // latestMtime. No more hardcoded source list — whatever is in the registry drives
 // the fingerprint, so discover.js derivation and skill-cache cannot drift.
-function computeFingerprints() {
+function computeFingerprints(projectRoot) {
   const result = {};
 
   // Locale — cached groups may contain localized strings (phase descriptions,
@@ -46,7 +49,7 @@ function computeFingerprints() {
 
   // Registry — aggregate file stats per source (excluding plugin-* sources,
   // which are fingerprinted by plugin metadata above).
-  const reg = sourceRegistry.loadRegistry();
+  const reg = sourceRegistry.loadRegistry(projectRoot);
   if (reg && reg.assignments) {
     const bySource = new Map();
     for (const [filePath, entry] of Object.entries(reg.assignments)) {
@@ -101,9 +104,9 @@ function fingerprintsMatch(cached, current) {
   return true;
 }
 
-function loadCache() {
+function loadCache(projectRoot) {
   try {
-    const raw = fs.readFileSync(CACHE_FILE, 'utf8');
+    const raw = fs.readFileSync(getCachePath(projectRoot), 'utf8');
     const data = JSON.parse(raw);
     if (data.schemaVersion !== CACHE_SCHEMA_VERSION) return null;
     if (!data.methodologies || !Array.isArray(data.groups)) return null;
@@ -113,22 +116,23 @@ function loadCache() {
   }
 }
 
-function saveCache(fingerprints, groups) {
+function saveCache(fingerprints, groups, projectRoot) {
   const data = {
     schemaVersion: CACHE_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
     methodologies: fingerprints,
     groups,
   };
-  fs.mkdirSync(CACHE_DIR, { recursive: true });
-  fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2));
+  const filePath = getCachePath(projectRoot);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
-function getSkillGroups(buildGroupsFn, { force = false } = {}) {
-  const current = computeFingerprints();
+function getSkillGroups(buildGroupsFn, { force = false, projectRoot } = {}) {
+  const current = computeFingerprints(projectRoot);
   // force=true 이면 디스크 캐시를 무시하고 항상 새로 discover·빌드한 뒤 재저장.
   // compose UI 의 'r' (다시 읽기) 같이 사용자가 명시적으로 재스캔을 요청할 때 사용.
-  const cached = force ? null : loadCache();
+  const cached = force ? null : loadCache(projectRoot);
 
   if (cached && fingerprintsMatch(cached.methodologies, current)) {
     // Cache hit: reconstruct byId from the cached groups
@@ -143,13 +147,13 @@ function getSkillGroups(buildGroupsFn, { force = false } = {}) {
 
   // Cache miss: discover (populates source-registry), build, save.
   // Fingerprint is recomputed AFTER discover so registry-driven keys are present.
-  const discovered = discover.discoverAll({ workflowOnly: false });
-  const workflowOnly = discover.discoverAll({ workflowOnly: true });
+  const discovered = discover.discoverAll({ workflowOnly: false, projectRoot });
+  const workflowOnly = discover.discoverAll({ workflowOnly: true, projectRoot });
   const byId = new Map(discovered.map(s => [s.id, s]));
   const groups = buildGroupsFn(discovered, workflowOnly, byId);
 
   try {
-    saveCache(computeFingerprints(), groups);
+    saveCache(computeFingerprints(projectRoot), groups, projectRoot);
   } catch (e) {
     // Non-fatal — TUI still works without cache
     process.stderr.write(`[skill-cache] warn: could not write cache: ${e.message}\n`);

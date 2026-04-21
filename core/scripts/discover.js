@@ -878,9 +878,11 @@ function discoverAll(options = {}) {
     minClusterSize = 2,
     persistRegistry = true,
     cli,
+    projectRoot,
   } = options;
   const home = homeDir || os.homedir();
   const cwdPath = cwd || process.cwd();
+  const registryRoot = projectRoot || cwdPath;
 
   // Pass 0 — CLI resolution + per-CLI path list. `cli` option overrides env
   // detection. `'all'` scans every CLI's effective roots (legacy / cross-CLI
@@ -1000,7 +1002,7 @@ function discoverAll(options = {}) {
     ...(Array.isArray(customSourcePrefixes) ? customSourcePrefixes : []),
     ...KNOWN_PREFIXES,
   ];
-  const existingRegistry = persistRegistry ? sourceRegistry.loadRegistry() : null;
+  const existingRegistry = persistRegistry ? sourceRegistry.loadRegistry(registryRoot) : null;
   const derived = sourceRegistry.derivePrefixes(parsedList, {
     seed,
     existingRegistry,
@@ -1010,7 +1012,7 @@ function discoverAll(options = {}) {
   const registry = { schemaVersion: sourceRegistry.SCHEMA_VERSION, assignments: derived.assignments };
   if (persistRegistry) {
     try {
-      sourceRegistry.saveRegistry(derived);
+      sourceRegistry.saveRegistry(derived, registryRoot);
     } catch (e) {
       if (debug) process.stderr.write(`[source-registry] warn: could not write: ${e.message}\n`);
     }

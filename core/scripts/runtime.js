@@ -113,8 +113,78 @@ function sessionIdFor(name) {
   return `${stamp}-${rand}-${name}`;
 }
 
-function resolveSkillPaths(steps) {
-  const all = discover.discoverAll({ workflowOnly: false });
+function validatePresetSkills(preset, discoverResult) {
+  const discovered = discoverResult || discover.discoverAll({ workflowOnly: false });
+  const byId = new Map(discovered.map((s) => [s.id, s]));
+
+  // Index by bare name (portion after ":") for same-name-different-source hints.
+  // Must use id's name segment (not s.name which is the raw dir name) so that
+  // matching aligns with how ids are written in presets.
+  const byName = new Map();
+  for (const s of discovered) {
+    const name = s.id.includes(':') ? s.id.split(':')[1] : s.id;
+    if (!byName.has(name)) byName.set(name, []);
+    byName.get(name).push(s.id);
+  }
+  const allSources = new Set(discovered.map((s) => s.source));
+
+  const missing = [];
+  for (const step of preset.steps || []) {
+    const id = step.skillId;
+    if (!id) continue;
+    // Pre-filled skillPath (typically injected by tests or trusted tooling)
+    // bypasses discovery lookup — same contract as resolveSkillPaths.
+    if (step.skillPath) continue;
+    if (byId.has(id)) continue;
+
+    const name = id.includes(':') ? id.split(':')[1] : id;
+    const idSource = id.includes(':') ? id.split(':')[0] : null;
+    const candidates = (byName.get(name) || []).filter((x) => x !== id).slice(0, 3);
+
+    const hints = [];
+    if (candidates.length > 0) {
+      hints.push({
+        kind: 'same-name-different-source',
+        message: `같은 이름의 스킬이 다른 source 로 있습니다 — ${candidates.join(', ')}`,
+        candidates,
+      });
+    } else if (idSource && !allSources.has(idSource)) {
+      hints.push({
+        kind: 'project-local',
+        message: '이 스킬은 프로젝트 로컬 스킬이며 현재 프로젝트에 설치돼 있지 않습니다',
+      });
+    } else {
+      hints.push({
+        kind: 'no-candidate',
+        message: '현재 프로젝트에 설치돼 있지 않습니다',
+      });
+    }
+
+    missing.push({ id, name, hints });
+  }
+
+  return { ok: missing.length === 0, missing };
+}
+
+function formatValidationError(workflowName, validation) {
+  const lines = [
+    `프리셋 "${workflowName}" 을 실행할 수 없습니다. 현재 프로젝트에서 찾을 수 없는 스킬 ${validation.missing.length}개:`,
+    '',
+  ];
+  for (const m of validation.missing) {
+    lines.push(`  ✗ ${m.id}`);
+    for (const h of m.hints) {
+      lines.push(`    (힌트: ${h.message})`);
+    }
+    lines.push('');
+  }
+  lines.push('프리셋을 이 프로젝트에서 만들지 않았다면, source 가 달라 id 가 맞지 않을 수 있습니다.');
+  lines.push('/weave:compose 로 현재 프로젝트 기준 id 로 다시 저장하세요.');
+  return lines.join('\n');
+}
+
+function resolveSkillPaths(steps, discoverResult) {
+  const all = discoverResult || discover.discoverAll({ workflowOnly: false });
   const byId = new Map(all.map((s) => [s.id, s]));
   return steps.map((step) => {
     if (step.skillPath) return step;
@@ -125,21 +195,20 @@ function resolveSkillPaths(steps) {
 
 function start(workflowName, options = {}) {
   const preset = storage.load(workflowName);
+
+  // Pre-flight validation — must pass BEFORE acquiring the lock, so a
+  // misconfigured preset never leaves a stale lock behind.
+  const discovered = discover.discoverAll({ workflowOnly: false });
+  const validation = validatePresetSkills(preset, discovered);
+  if (!validation.ok) {
+    throw new Error(formatValidationError(workflowName, validation));
+  }
+
   const weaveDir = paths.projectWeaveDir();
   if (!acquireLock(weaveDir)) {
     throw new Error('Another weave session is running (lock held)');
   }
-  const resolvedSteps = resolveSkillPaths(preset.steps);
-  const missing = resolvedSteps
-    .filter((s) => !s.skillPath)
-    .map((s) => s.skillId);
-  if (missing.length > 0) {
-    releaseLock(weaveDir);
-    throw new Error(
-      `Cannot start session — these skills are not installed: ${missing.join(', ')}. ` +
-        `Install the plugins or edit the preset to remove them.`
-    );
-  }
+  const resolvedSteps = resolveSkillPaths(preset.steps, discovered);
   const session = {
     schemaVersion: 1,
     workflowName,
@@ -617,6 +686,7 @@ module.exports = {
   saveSession,
   start,
   end,
+  validatePresetSkills,
   advance,
   rollback,
   registerArtifacts,

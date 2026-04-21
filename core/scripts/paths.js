@@ -21,6 +21,14 @@ function projectWorkflowsDir(projectRoot) {
   return path.join(projectWeaveDir(projectRoot), 'workflows');
 }
 
+function projectCacheDir(projectRoot) {
+  return path.join(projectWeaveDir(projectRoot), 'cache');
+}
+
+function projectRegistryFile(projectRoot) {
+  return path.join(projectWeaveDir(projectRoot), 'source-registry.json');
+}
+
 function sessionPath(projectRoot) {
   return path.join(projectWeaveDir(projectRoot), 'session.json');
 }
@@ -45,6 +53,8 @@ module.exports = {
   GLOBAL_CONFIG,
   projectWeaveDir,
   projectWorkflowsDir,
+  projectCacheDir,
+  projectRegistryFile,
   sessionPath,
   lockPath,
   archiveDir,

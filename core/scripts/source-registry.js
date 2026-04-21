@@ -7,9 +7,12 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { CACHE_DIR } = require('./paths.js');
+const paths = require('./paths.js');
 
-const REGISTRY_FILE = path.join(CACHE_DIR, 'source-registry.json');
+function getRegistryPath(projectRoot) {
+  return paths.projectRegistryFile(projectRoot);
+}
+
 const SCHEMA_VERSION = 1;
 
 // ──────────────────────── derivation ────────────────────────
@@ -149,9 +152,9 @@ function derivePrefixes(parsedList, options = {}) {
 
 // ──────────────────────── persistence ────────────────────────
 
-function loadRegistry() {
+function loadRegistry(projectRoot) {
   try {
-    const raw = fs.readFileSync(REGISTRY_FILE, 'utf8');
+    const raw = fs.readFileSync(getRegistryPath(projectRoot), 'utf8');
     const data = JSON.parse(raw);
     if (data.schemaVersion !== SCHEMA_VERSION) return null;
     if (!data.assignments || typeof data.assignments !== 'object') return null;
@@ -161,19 +164,21 @@ function loadRegistry() {
   }
 }
 
-function saveRegistry({ prefixes, assignments }) {
+function saveRegistry({ prefixes, assignments }, projectRoot) {
   const data = {
     schemaVersion: SCHEMA_VERSION,
     generatedAt: nowIso(),
     derivedPrefixes: prefixes,
     assignments,
   };
-  fs.mkdirSync(CACHE_DIR, { recursive: true });
-  fs.writeFileSync(REGISTRY_FILE, JSON.stringify(data, null, 2));
+  const filePath = getRegistryPath(projectRoot);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
-function deleteRegistry() {
-  if (fs.existsSync(REGISTRY_FILE)) fs.unlinkSync(REGISTRY_FILE);
+function deleteRegistry(projectRoot) {
+  const filePath = getRegistryPath(projectRoot);
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 }
 
 function resolveSource(filePath, registry) {
@@ -199,7 +204,7 @@ function diffAssignments(prev, next) {
 
 module.exports = {
   SCHEMA_VERSION,
-  REGISTRY_FILE,
+  getRegistryPath,
   derivePrefixes,
   loadRegistry,
   saveRegistry,
