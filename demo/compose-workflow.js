@@ -401,7 +401,7 @@ function termSize() {
 }
 
 function drawHeader(cols) {
-  const baseTitle = t.headerTitle;
+  const baseTitle = `${t.headerTitle} (${process.cwd()})`;
   const suffix = SINGLE_PICK
     ? (lang === 'ko' ? '  [1개만 선택 — edit-session]' : '  [single pick — edit-session]')
     : '';

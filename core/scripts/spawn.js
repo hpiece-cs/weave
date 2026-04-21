@@ -55,15 +55,18 @@ function appleScriptRun(script) {
   return spawnSync('osascript', ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-function buildShellCmd(demo, marker, extraArgs = []) {
+function buildShellCmd(demo, marker, extraArgs = [], originCwd) {
   // stdout 은 TUI 렌더 전용이라 redirect 하지 않는다. --single-pick 모드는
   // compose-workflow.js 내부에서 --result-file 로 지정된 경로에 결과를 쓴다.
+  // originCwd 는 spawn 된 shell 이 cd 할 디렉토리 — 프로젝트 스코프 데이터
+  // (registry/cache) 가 올바른 경로에 쓰이려면 호출자 cwd 를 전파해야 한다.
   const argStr = extraArgs.map((a) => JSON.stringify(a)).join(' ');
-  return `clear; node ${JSON.stringify(demo)} ${argStr}; printf '' > ${JSON.stringify(marker)}; exit`;
+  const cdPart = originCwd ? `cd ${JSON.stringify(originCwd)}; ` : '';
+  return `clear; ${cdPart}node ${JSON.stringify(demo)} ${argStr}; printf '' > ${JSON.stringify(marker)}; exit`;
 }
 
-function spawnMac(demo, marker, extraArgs = []) {
-  const shellCmd = buildShellCmd(demo, marker, extraArgs);
+function spawnMac(demo, marker, extraArgs = [], originCwd) {
+  const shellCmd = buildShellCmd(demo, marker, extraArgs, originCwd);
   const termProgram = process.env.TERM_PROGRAM || '';
 
   // Prefer the user's current terminal if it's iTerm2 and scriptable.
@@ -120,9 +123,10 @@ function closeItermWindow() {
 
 // ── Linux ──────────────────────────────────────────────────────────
 
-function spawnLinux(demo, marker, extraArgs = []) {
+function spawnLinux(demo, marker, extraArgs = [], originCwd) {
   const argStr = extraArgs.map((a) => JSON.stringify(a)).join(' ');
-  const inner = `node ${JSON.stringify(demo)} ${argStr}; printf '' > ${JSON.stringify(marker)}; exit`;
+  const cdPart = originCwd ? `cd ${JSON.stringify(originCwd)}; ` : '';
+  const inner = `${cdPart}node ${JSON.stringify(demo)} ${argStr}; printf '' > ${JSON.stringify(marker)}; exit`;
   const candidates = [
     ['gnome-terminal', ['--', 'bash', '-c', inner]],
     ['konsole', ['--separate', '-e', 'bash', '-c', inner]],
@@ -146,10 +150,11 @@ function spawnLinux(demo, marker, extraArgs = []) {
 
 // ── Windows ────────────────────────────────────────────────────────
 
-function spawnWindows(demo, marker, extraArgs = []) {
+function spawnWindows(demo, marker, extraArgs = [], originCwd) {
   // `start "title" cmd /c "node demo & type nul > marker & exit"` opens a new window.
   const argStr = extraArgs.map((a) => `"${a}"`).join(' ');
-  const inner = `node "${demo}" ${argStr} & type nul > "${marker}" & exit`;
+  const cdPart = originCwd ? `cd /d "${originCwd}" & ` : '';
+  const inner = `${cdPart}node "${demo}" ${argStr} & type nul > "${marker}" & exit`;
   try {
     const child = spawnChild('cmd', ['/c', 'start', '"weave:compose"', 'cmd', '/c', inner], {
       detached: true,
@@ -169,13 +174,17 @@ function spawnCompose(options = {}) {
   const demo = options.demo || demoPath();
   const marker = options.marker || makeMarkerPath();
   const extraArgs = options.args || [];
+  // Propagate caller cwd so the spawned shell can cd there before running node.
+  // Without this, macOS Terminal.app opens in $HOME and project-scope
+  // registry/cache end up in the wrong location.
+  const originCwd = options.cwd || process.cwd();
   if (fs.existsSync(marker)) fs.unlinkSync(marker);
 
   const platform = os.platform();
   let result;
-  if (platform === 'darwin') result = spawnMac(demo, marker, extraArgs);
-  else if (platform === 'linux') result = spawnLinux(demo, marker, extraArgs);
-  else if (platform === 'win32') result = spawnWindows(demo, marker, extraArgs);
+  if (platform === 'darwin') result = spawnMac(demo, marker, extraArgs, originCwd);
+  else if (platform === 'linux') result = spawnLinux(demo, marker, extraArgs, originCwd);
+  else if (platform === 'win32') result = spawnWindows(demo, marker, extraArgs, originCwd);
   else result = { spawned: false, reason: `unsupported platform: ${platform}` };
 
   if (!result.spawned) {
