@@ -1,6 +1,6 @@
 {
   "name": "weave",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agentic workflow composer — discover installed skills, chain them into reusable workflows, orchestrate execution.",
   "license": "MIT",
   "type": "commonjs",
