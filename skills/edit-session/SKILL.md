@@ -16,8 +16,8 @@ domain: session-control
 dataRole: session-mutator
 scope: project
 filePatterns:
-  - input: {proj}/.weave/session.json
-  - output: {proj}/.weave/session.json (steps[] modified)
+  - input: "{proj}/.weave/session.json"
+  - output: "{proj}/.weave/session.json (steps[] modified)"
 mutates: true
 frequency: rare-on-edit
 ---

@@ -2,6 +2,77 @@
 
 > 한국어: [001-release-notes-v0.1.0.ko.md](001-release-notes-v0.1.0.ko.md)
 
+## v0.1.2 — Codex support
+
+**Release date:** 2026-04-25
+
+Weave now installs into **Codex CLI** as a first-class target — alongside Claude Code, Gemini CLI, opencode, and Copilot CLI.
+
+### What this means
+
+You can run the same Weave presets you already use elsewhere from inside Codex. No extra config — just install and Weave shows up in Codex's native skill picker.
+
+### Install
+
+Pick the scope that fits how you use Codex:
+
+```bash
+# Most users — install once, available everywhere
+node install.js --target=codex
+
+# Per-project install (e.g. team-shared presets in a repo)
+node install.js --target=codex --scope=project
+```
+
+| Scope | Where it lands | When to use |
+|---|---|---|
+| `global` (default) | `~/.codex/skills/` | Personal workflows across all your projects |
+| `project` | `<cwd>/.agents/skills/` | Repo-scoped, committable setups |
+
+> `--scope=project` is currently Codex-only. Other targets (claude, gemini, opencode) install globally.
+
+### How to use it in Codex
+
+Codex doesn't use slash commands like `/weave:run` — it uses **skill mentions**.
+
+1. Type `/skills` in Codex to browse installed Weave skills.
+2. Or mention a skill directly:
+
+   ```
+   $weave-run my-preset
+   $weave-status
+   $weave-compose
+   ```
+
+Cheat sheet — what to type in each CLI:
+
+| You used to type… | In Codex, type… |
+|---|---|
+| `/weave:run` | `$weave-run` |
+| `/weave:status` | `$weave-status` |
+| `/weave:compose` | `$weave-compose` |
+| `/weave:list` | `$weave-list` |
+
+> Note: the custom `/weave:*` slash entrypoints aren't guaranteed in Codex — use `/skills` or `$skill-name` instead.
+
+### Uninstall
+
+```bash
+node install.js --uninstall --target=codex                  # global
+node install.js --uninstall --target=codex --scope=project  # project-local
+```
+
+## v0.1.1 — Patch release
+
+**Release date:** 2026-04-22
+
+Bug-fix release tightening skill discovery and preset application.
+
+### Fixes
+
+- **Project-scoped skill discovery.** Fixed the lookup logic in workflow skill auto-discovery so skills under the project path are resolved correctly.
+- **Preset validation.** Added a check for missing skills when applying a preset, so presets referencing uninstalled skills surface the issue instead of failing silently.
+
 ## v0.1.0 — First public release
 
 **Release date:** 2026-04-19

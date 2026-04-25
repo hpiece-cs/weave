@@ -2,11 +2,11 @@
 
 > 한국어: [README.ko.md](README.ko.md)
 
-**Agentic workflow composer for agentic coding CLIs** — Claude Code, opencode, Gemini CLI, and Copilot CLI. Weave discovers skills installed across your CLI's plugins and extensions, chains them into reusable **workflow presets**, and orchestrates step-by-step execution. Session state lives on the filesystem, so you survive context compaction, rollback, and resume across sessions.
+**Agentic workflow composer for agentic coding CLIs** — Claude Code, opencode, Gemini CLI, Copilot CLI, and Codex. Weave discovers skills installed across your CLI's plugins and extensions, chains them into reusable **workflow presets**, and orchestrates step-by-step execution. Session state lives on the filesystem, so you survive context compaction, rollback, and resume across sessions.
 
 - **Repo:** [github.com/hpiece-cs/weave](https://github.com/hpiece-cs/weave)
-- **Supported CLIs:** Claude Code, opencode, Gemini CLI, Copilot CLI
-  - Direct install targets (`--target=...`): `claude`, `opencode`, `gemini`
+- **Supported CLIs:** Claude Code, opencode, Gemini CLI, Copilot CLI, Codex
+  - Direct install targets (`--target=...`): `claude`, `opencode`, `gemini`, `codex`
   - Copilot CLI reads `~/.claude/skills/`, so `--target=claude` (or the default install) serves it automatically — no separate flag needed.
 - **Node:** 18+
 
@@ -93,7 +93,7 @@ All session state lives as JSON on disk. So:
 
 Simplified for the user:
 
-- **Top — the instructions layer.** 13 skills surfaced as slash commands (`/weave:compose`, `/weave:run`, …). The agent reads and executes them.
+- **Top — the instructions layer.** 13 skills surfaced through each CLI's native command or skill surface (`/weave:compose`, `/weave-run`, `/skills`, …). The agent reads and executes them.
 - **Bottom — the state layer.** Presets, sessions, artifacts, locks. All files, all human-readable.
 
 This split keeps Weave independent of any particular agent implementation and mostly immune to model / CLI / version upgrades.
@@ -129,6 +129,8 @@ cd weave
 ```bash
 node install.js                          # auto-detect all configured CLIs
 node install.js --target=claude          # Claude Code only
+node install.js --target=codex           # Codex only (global scope)
+node install.js --target=codex --scope=project
 node install.js --target=claude,opencode # multiple targets at once
 node install.js --dry-run                # preview without writing
 ```
@@ -140,19 +142,24 @@ This copies:
   - `--target=claude` → `~/.claude/skills/weave-*/SKILL.md` → `/weave:*` (13 commands)
   - `--target=opencode` → `~/.config/opencode/command/weave-*.md` → `/weave-*` (13 commands)
   - `--target=gemini` → `~/.gemini/commands/weave/*.toml` → `/weave:*` (13 commands)
+  - `--target=codex` → `~/.codex/skills/weave-*/SKILL.md` (native Codex skills)
+  - `--target=codex --scope=project` → `<project>/.agents/skills/weave-*/SKILL.md`
 
 Copilot CLI is **covered by the claude target**: Copilot scans `~/.claude/skills/` by design, so a `--target=claude` install automatically surfaces the 13 weave commands inside Copilot CLI as `/weave-*`. No separate Copilot flag exists.
 
-When `--target` is omitted, the installer probes `~/.claude/`, `~/.gemini/`, and `~/.config/opencode/` and installs to every CLI it finds (falling back to Claude Code if none are detected).
+`--scope` defaults to `global`. `--scope=project` is currently supported only for `--target=codex`. Auto-detect install always uses `global` scope.
+
+When `--target` is omitted, the installer probes `~/.claude/`, `~/.gemini/`, `~/.config/opencode/`, `.codex`, and `.agents` and installs to every CLI it finds (falling back to Claude Code if none are detected).
 
 The installer is idempotent — rerunning is safe.
 
 ### 3. Verify
 
-Open your CLI and type `/weave` — the 13 slash commands should appear.
+Open your CLI and check that Weave is visible on that surface.
 
 - Claude Code · Gemini CLI → `/weave:<name>` (namespace support)
 - opencode · Copilot CLI → `/weave-<name>` (hyphen — these surfaces flatten the namespace)
+- Codex → native skill discovery via `/skills`; skills can also be explicitly mentioned with Codex's `$skill-name` syntax
 
 ### Update
 
@@ -167,6 +174,8 @@ node install.js
 ```bash
 node install.js --uninstall                           # remove every detected target + runtime
 node install.js --uninstall --target=gemini           # remove one CLI only (runtime stays)
+node install.js --uninstall --target=codex            # remove global Codex skills only
+node install.js --uninstall --target=codex --scope=project
 node install.js --uninstall --target=claude,opencode  # remove several CLIs
 node install.js --uninstall --dry-run                 # preview what would be removed
 ```
@@ -176,6 +185,8 @@ What gets removed:
 - `--target=claude` → `~/.claude/skills/weave-*/` (this also removes the commands Copilot CLI was reading — single source)
 - `--target=opencode` → `~/.config/opencode/command/weave-*.md`
 - `--target=gemini` → `~/.gemini/commands/weave/*.toml` (+ the empty `weave/` namespace dir)
+- `--target=codex` → `~/.codex/skills/weave-*/`
+- `--target=codex --scope=project` → `<project>/.agents/skills/weave-*/`
 - No `--target` → every detected CLI above **plus** `~/.weave/bin/` (the runtime)
 
 `~/.weave/workflows/` is **never** removed automatically — it holds your global workflow presets. Delete manually if you no longer need them:
@@ -206,9 +217,18 @@ rm -rf ~/.weave ~/.claude/skills/weave-* ~/.gemini/commands/weave ~/.config/open
    /weave:status
    ```
 
-## Slash commands
+## Command Surfaces
 
-Surfaced on every supported CLI. Claude Code · Gemini CLI use `/weave:*`; opencode · Copilot CLI use `/weave-*`.
+Surfaced through each supported CLI's native entrypoint. Claude Code · Gemini CLI use `/weave:*`; opencode · Copilot CLI use `/weave-*`; Codex uses `/skills` and supports explicit skill mentions with its `$skill-name` syntax.
+
+Codex examples:
+
+```text
+/skills            # browse installed Weave skills
+$weave-run my-flow
+$weave-status
+$weave-compose
+```
 
 | Command | Purpose |
 |---|---|
@@ -225,6 +245,8 @@ Surfaced on every supported CLI. Claude Code · Gemini CLI use `/weave:*`; openc
 | `/weave:manage` | Edit / clone / delete / promote / demote presets. |
 | `/weave:edit-session` | Modify the **active** session — skip pending steps or insert new ones (session only, preset template untouched). |
 | `/weave:help` | Context-aware help. |
+
+For Codex, read those rows as the matching skill names: `weave-compose`, `weave-list`, `weave-run`, `weave-status`, and so on. Use `/skills` to browse them, or mention them with Codex's `$skill-name` form.
 
 ## File layout
 

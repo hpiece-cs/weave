@@ -6,10 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-// Isolate WEAVE_HOME before loading modules (source-registry resolves CACHE_DIR eagerly).
-const WEAVE_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'weave-reg-'));
-process.env.WEAVE_HOME = WEAVE_TMP;
-
+// source-registry now resolves paths per-call via projectRoot arg, so no WEAVE_HOME setup needed.
 const sourceRegistry = require('../core/scripts/source-registry.js');
 
 // ── buildPrefixCounts ──────────────────────────────────────
@@ -158,58 +155,38 @@ test('derivePrefixes — retains historical assignments for absent files', () =>
 // ── persistence ────────────────────────────────────────────
 
 test('saveRegistry + loadRegistry — round trip', () => {
-  // Use a fresh subdir so this test does not collide with other tests.
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'weave-reg-rt-'));
-  const prevHome = process.env.WEAVE_HOME;
-  process.env.WEAVE_HOME = tmp;
-  // Re-require in an isolated module path (node:module cache).
-  delete require.cache[require.resolve('../core/scripts/paths.js')];
-  delete require.cache[require.resolve('../core/scripts/source-registry.js')];
-  const reg = require('../core/scripts/source-registry.js');
 
-  reg.saveRegistry({
+  sourceRegistry.saveRegistry({
     prefixes: ['bmad', 'gds'],
     assignments: {
       '/a/SKILL.md': { source: 'bmad', signal: 'seed', firstSeen: 'now' },
     },
-  });
-  const loaded = reg.loadRegistry();
+  }, tmp);
+  const loaded = sourceRegistry.loadRegistry(tmp);
   assert.ok(loaded);
   assert.strictEqual(loaded.schemaVersion, 1);
   assert.deepStrictEqual(loaded.derivedPrefixes, ['bmad', 'gds']);
   assert.strictEqual(loaded.assignments['/a/SKILL.md'].source, 'bmad');
-
-  // Restore
-  process.env.WEAVE_HOME = prevHome;
-  delete require.cache[require.resolve('../core/scripts/paths.js')];
-  delete require.cache[require.resolve('../core/scripts/source-registry.js')];
 });
 
 test('loadRegistry — returns null on missing/corrupt/wrong schema', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'weave-reg-corrupt-'));
-  const prevHome = process.env.WEAVE_HOME;
-  process.env.WEAVE_HOME = tmp;
-  delete require.cache[require.resolve('../core/scripts/paths.js')];
-  delete require.cache[require.resolve('../core/scripts/source-registry.js')];
-  const reg = require('../core/scripts/source-registry.js');
 
-  assert.strictEqual(reg.loadRegistry(), null);
+  // Missing
+  assert.strictEqual(sourceRegistry.loadRegistry(tmp), null);
 
   // Wrong schema
-  fs.mkdirSync(path.join(tmp, 'cache'), { recursive: true });
+  fs.mkdirSync(path.join(tmp, '.weave'), { recursive: true });
   fs.writeFileSync(
-    path.join(tmp, 'cache', 'source-registry.json'),
+    path.join(tmp, '.weave', 'source-registry.json'),
     JSON.stringify({ schemaVersion: 999, assignments: {} })
   );
-  assert.strictEqual(reg.loadRegistry(), null);
+  assert.strictEqual(sourceRegistry.loadRegistry(tmp), null);
 
   // Corrupt JSON
-  fs.writeFileSync(path.join(tmp, 'cache', 'source-registry.json'), 'not json');
-  assert.strictEqual(reg.loadRegistry(), null);
-
-  process.env.WEAVE_HOME = prevHome;
-  delete require.cache[require.resolve('../core/scripts/paths.js')];
-  delete require.cache[require.resolve('../core/scripts/source-registry.js')];
+  fs.writeFileSync(path.join(tmp, '.weave', 'source-registry.json'), 'not json');
+  assert.strictEqual(sourceRegistry.loadRegistry(tmp), null);
 });
 
 // ── resolveSource ──────────────────────────────────────────

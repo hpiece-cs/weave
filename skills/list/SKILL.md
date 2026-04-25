@@ -16,8 +16,8 @@ domain: preset-management
 dataRole: preset-discovery
 scope: global|project
 filePatterns:
-  - input: ~/.weave/workflows/*.json + .weave/workflows/*.json
-  - output: terminal display (name, steps, scope, updated time)
+  - input: "~/.weave/workflows/*.json + .weave/workflows/*.json"
+  - output: "terminal display (name, steps, scope, updated time)"
 mutates: false
 frequency: rare
 ---

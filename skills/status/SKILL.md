@@ -16,8 +16,8 @@ domain: session-query
 dataRole: state-inspector
 scope: project
 filePatterns:
-  - input: {proj}/.weave/session.json
-  - output: terminal display (step, status, autoMode, checkpoint) + optional restore
+  - input: "{proj}/.weave/session.json"
+  - output: "terminal display (step, status, autoMode, checkpoint) + optional restore"
 mutates: false-or-restore
 frequency: variable
 ---

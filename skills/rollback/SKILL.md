@@ -16,8 +16,8 @@ domain: session-control
 dataRole: state-reverter
 scope: project
 filePatterns:
-  - input: {proj}/.weave/session.json
-  - output: {proj}/.weave/session.json (currentStep--, steps[].status reverted)
+  - input: "{proj}/.weave/session.json"
+  - output: "{proj}/.weave/session.json (currentStep--, steps[].status reverted)"
 mutates: true
 frequency: rare-on-error
 ---

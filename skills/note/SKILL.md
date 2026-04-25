@@ -16,8 +16,8 @@ domain: session-orchestration
 dataRole: context-annotator
 scope: project
 filePatterns:
-  - input: {proj}/.weave/session.json + note text
-  - output: {proj}/.weave/session.json (notes[] appended)
+  - input: "{proj}/.weave/session.json + note text"
+  - output: "{proj}/.weave/session.json (notes[] appended)"
 mutates: true
 frequency: variable
 ---

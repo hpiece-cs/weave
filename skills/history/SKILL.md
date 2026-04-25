@@ -16,8 +16,8 @@ domain: session-query
 dataRole: history-reviewer
 scope: project
 filePatterns:
-  - input: {proj}/.weave/session.json (steps[status=completed])
-  - output: terminal display (step order, artifacts, timestamps, keywords)
+  - input: "{proj}/.weave/session.json (steps[status=completed])"
+  - output: "terminal display (step order, artifacts, timestamps, keywords)"
 mutates: false
 frequency: variable
 ---

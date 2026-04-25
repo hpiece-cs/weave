@@ -16,8 +16,8 @@ domain: guidance
 dataRole: contextual-guide
 scope: project
 filePatterns:
-  - input: {proj}/.weave/session.json + {skillSource}/skills/{skillName}/SKILL.md
-  - output: terminal display (step info, available tools, next step)
+  - input: "{proj}/.weave/session.json + {skillSource}/skills/{skillName}/SKILL.md"
+  - output: "terminal display (step info, available tools, next step)"
 mutates: false
 frequency: frequent-per-step
 ---

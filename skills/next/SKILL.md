@@ -16,8 +16,8 @@ domain: session-orchestration
 dataRole: step-advancer
 scope: project
 filePatterns:
-  - input: {proj}/.weave/session.json + user-reported artifacts
-  - output: {proj}/.weave/session.json (currentStep advanced, outputs registered)
+  - input: "{proj}/.weave/session.json + user-reported artifacts"
+  - output: "{proj}/.weave/session.json (currentStep advanced, outputs registered)"
 mutates: true
 frequency: frequent-when-needed
 ---

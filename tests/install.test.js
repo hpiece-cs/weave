@@ -15,6 +15,7 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'weave-install-home-'));
 const WEAVE_HOME = path.join(TEST_HOME, '.weave');
 const CLAUDE_SKILLS = path.join(TEST_HOME, '.claude', 'skills');
+const GLOBAL_CODEX_SKILLS = path.join(TEST_HOME, '.codex', 'skills');
 
 after(() => {
   fs.rmSync(TEST_HOME, { recursive: true, force: true });
@@ -23,11 +24,21 @@ after(() => {
 beforeEach(() => {
   fs.rmSync(WEAVE_HOME, { recursive: true, force: true });
   fs.rmSync(path.join(TEST_HOME, '.claude'), { recursive: true, force: true });
+  fs.rmSync(path.join(TEST_HOME, '.agents'), { recursive: true, force: true });
+  fs.rmSync(path.join(TEST_HOME, '.codex'), { recursive: true, force: true });
 });
 
 function install(extraEnv = {}) {
   return spawnSync(process.execPath, [INSTALLER], {
     cwd: REPO_ROOT,
+    env: { ...process.env, HOME: TEST_HOME, WEAVE_HOME, ...extraEnv },
+    encoding: 'utf8',
+  });
+}
+
+function installArgs(args, { cwd = REPO_ROOT, extraEnv = {} } = {}) {
+  return spawnSync(process.execPath, [INSTALLER, ...args], {
+    cwd,
     env: { ...process.env, HOME: TEST_HOME, WEAVE_HOME, ...extraEnv },
     encoding: 'utf8',
   });
@@ -108,4 +119,57 @@ test('install honors $WEAVE_HOME override', () => {
   assert.strictEqual(r.status, 0);
   assert.ok(fs.existsSync(path.join(customHome, 'bin', 'cli.js')));
   assert.ok(r.stdout.includes(customHome));
+});
+
+test('install.js --target=codex defaults scope to global ~/.codex/skills', () => {
+  fs.mkdirSync(path.join(TEST_HOME, '.codex'), { recursive: true });
+  const r = installArgs(['--target=codex']);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.ok(
+    fs.existsSync(path.join(GLOBAL_CODEX_SKILLS, 'weave-status', 'SKILL.md')),
+    'expected codex install to land in global .codex/skills'
+  );
+});
+
+test('install.js --target=codex --scope=project writes to <cwd>/.agents/skills', () => {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'weave-codex-project-'));
+  try {
+    fs.mkdirSync(path.join(TEST_HOME, '.codex'), { recursive: true });
+    const r = installArgs(['--target=codex', '--scope=project'], { cwd: projectDir });
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.ok(
+      fs.existsSync(path.join(projectDir, '.agents', 'skills', 'weave-status', 'SKILL.md')),
+      'expected codex project install to land in <cwd>/.agents/skills'
+    );
+    assert.ok(
+      !fs.existsSync(path.join(GLOBAL_CODEX_SKILLS, 'weave-status', 'SKILL.md')),
+      'project scope should not write global codex entries'
+    );
+  } finally {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test('install.js rejects --scope=project for claude target', () => {
+  const r = installArgs(['--target=claude', '--scope=project']);
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /scope=project/i);
+  assert.match(r.stderr, /codex/i);
+});
+
+test('install.js rejects --scope=project for gemini target', () => {
+  const r = installArgs(['--target=gemini', '--scope=project']);
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /scope=project/i);
+  assert.match(r.stderr, /codex/i);
+});
+
+test('install.js auto-detect installs codex globally when codex is the only detected target', () => {
+  fs.mkdirSync(path.join(TEST_HOME, '.codex'), { recursive: true });
+  const r = install();
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.ok(
+    fs.existsSync(path.join(GLOBAL_CODEX_SKILLS, 'weave-status', 'SKILL.md')),
+    'expected auto-detect to install codex globally'
+  );
 });

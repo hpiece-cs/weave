@@ -1,6 +1,6 @@
 ---
 name: weave-run
-description: Execute a saved workflow preset step-by-step — start session, then loop on `step prepare` → skill runs → `step finish`. Supports --auto autonomous mode. Uses combined commands to minimize Bash roundtrips.
+description: "Execute a saved workflow preset step-by-step — start session, then loop on `step prepare` → skill runs → `step finish`. Supports --auto autonomous mode. Uses combined commands to minimize Bash roundtrips."
 processStage: preparation
 processOrder: 2.1
 lifecycleGroup: active-session-management
@@ -16,8 +16,8 @@ domain: session-orchestration
 dataRole: session-orchestrator
 scope: project
 filePatterns:
-  - input: ~/.weave/workflows/*.json (preset) + {proj}/.weave/session.json (resume)
-  - output: {proj}/.weave/session.json + {proj}/.weave/.lock
+  - input: "~/.weave/workflows/*.json (preset) + {proj}/.weave/session.json (resume)"
+  - output: "{proj}/.weave/session.json + {proj}/.weave/.lock"
 mutates: true
 frequency: rare-per-session
 ---

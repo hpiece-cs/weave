@@ -16,8 +16,8 @@ domain: session-control
 dataRole: diagnostician
 scope: project
 filePatterns:
-  - input: {proj}/.weave/session.json + {proj}/.weave/config.json + git status
-  - output: terminal display (comprehensive state dump, steps table, config, git status)
+  - input: "{proj}/.weave/session.json + {proj}/.weave/config.json + git status"
+  - output: "terminal display (comprehensive state dump, steps table, config, git status)"
 mutates: false
 frequency: rare-on-error
 ---

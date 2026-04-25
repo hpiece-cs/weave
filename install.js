@@ -16,7 +16,7 @@
 //   node install.js --uninstall --target=gemini  # remove commands from one CLI only (runtime stays)
 //   node install.js --uninstall --dry-run        # preview what would be removed
 //
-// Available adapters: claude, gemini, opencode (see core/adapters/).
+// Available adapters: claude, gemini, opencode, codex, copilot (see core/adapters/).
 
 'use strict';
 
@@ -32,11 +32,18 @@ const HOME = process.env.HOME || os.homedir();
 // ─────────── argv parsing ───────────────────────────────────
 
 function parseArgs(argv) {
-  const out = { positional: [], target: null, dryRun: false, uninstall: false };
+  const out = {
+    positional: [],
+    target: null,
+    scope: 'global',
+    dryRun: false,
+    uninstall: false,
+  };
   for (const a of argv) {
     if (a === '--dry-run') out.dryRun = true;
     else if (a === '--uninstall') out.uninstall = true;
     else if (a.startsWith('--target=')) out.target = a.slice('--target='.length);
+    else if (a.startsWith('--scope=')) out.scope = a.slice('--scope='.length);
     else out.positional.push(a);
   }
   return out;
@@ -137,7 +144,7 @@ function loadSkill(name) {
 function resolveTargets(spec, { allowReadOnly = false } = {}) {
   if (!spec) {
     const detected = adapters.detectTargets(HOME);
-    // readOnly adapters (codex, copilot) can't emit files — exclude from auto-detect
+    // readOnly adapters (copilot) can't emit files — exclude from auto-detect
     // so users get a clean "no target" fallback instead of a "render not implemented" throw.
     const writable = detected.filter((name) => !adapters.getAdapter(name).readOnly);
     if (writable.length === 0) {
@@ -164,15 +171,31 @@ function resolveTargets(spec, { allowReadOnly = false } = {}) {
   return list;
 }
 
+function validateScope(scope, targets, { explicitTarget = false } = {}) {
+  if (!['global', 'project'].includes(scope)) {
+    throw new Error(`Unknown scope: ${scope}. Use --scope=global|project`);
+  }
+  if (scope !== 'project') return;
+  if (!explicitTarget) {
+    throw new Error('--scope=project requires an explicit --target=codex');
+  }
+  const invalid = targets.filter((name) => name !== 'codex');
+  if (invalid.length > 0) {
+    throw new Error(
+      `--scope=project is only supported for codex. Unsupported target(s): ${invalid.join(', ')}`
+    );
+  }
+}
+
 // ─────────── skill installation per target ─────────────────
 
-function installSkillsForTarget(adapter, { dryRun }) {
+function installSkillsForTarget(adapter, { dryRun, scope = 'global', cwd = process.cwd() }) {
   const names = listSkillSources();
-  const dir = adapter.targetDir(HOME);
+  const dir = adapter.targetDir(HOME, { scope, cwd });
   const written = [];
   for (const name of names) {
     const skill = loadSkill(name);
-    const { filename, content } = adapter.render(skill);
+    const { filename, content } = adapter.render(skill, { scope, cwd });
     const dst = path.join(dir, filename);
     writeFile(dst, content, { dryRun });
     written.push(dst);
@@ -184,9 +207,9 @@ function installSkillsForTarget(adapter, { dryRun }) {
 
 // Remove the adapter-owned files for one target. Delegates to adapter.uninstall
 // so the per-CLI layout stays encapsulated.
-function uninstallSkillsForTarget(adapter, { dryRun }) {
-  const dir = adapter.targetDir(HOME);
-  const { removed } = adapter.uninstall(HOME, { dryRun });
+function uninstallSkillsForTarget(adapter, { dryRun, scope = 'global', cwd = process.cwd() }) {
+  const dir = adapter.targetDir(HOME, { scope, cwd });
+  const { removed } = adapter.uninstall(HOME, { dryRun, scope, cwd });
   return { count: removed.length, dir, removed };
 }
 
@@ -219,17 +242,18 @@ function statuslineSnippet() {
 }
 
 function main() {
-  const { dryRun, target, uninstall } = argv;
+  const { dryRun, target, scope, uninstall } = argv;
   let targets;
   try {
     targets = resolveTargets(target, { allowReadOnly: uninstall });
+    validateScope(scope, targets, { explicitTarget: Boolean(target) });
   } catch (e) {
     process.stderr.write(e.message + '\n');
     process.exit(2);
   }
 
   if (uninstall) {
-    runUninstall({ dryRun, target, targets });
+    runUninstall({ dryRun, target, targets, scope });
     return;
   }
 
@@ -243,9 +267,13 @@ function main() {
   const perTargetCounts = {};
   for (const name of targets) {
     const adapter = adapters.getAdapter(name);
-    const { count, dir } = installSkillsForTarget(adapter, { dryRun });
+    const { count, dir } = installSkillsForTarget(adapter, {
+      dryRun,
+      scope,
+      cwd: process.cwd(),
+    });
     perTargetCounts[name] = count;
-    summary.push(`  ${adapter.label.padEnd(12)} →  ${dir} (${count} skills)`);
+    summary.push(`  ${adapter.label.padEnd(12)} →  ${dir} (${count} skills, scope=${scope})`);
   }
 
   // Copilot CLI reads ~/.claude/skills/ directly. If the user has Copilot
@@ -273,7 +301,7 @@ function main() {
 // Uninstall path — symmetric to the install branch. When --target is given we
 // only clean that CLI (runtime stays, so other targets keep working). When it's
 // omitted we clean every detected writable target AND tear down the runtime.
-function runUninstall({ dryRun, target, targets }) {
+function runUninstall({ dryRun, target, targets, scope }) {
   const removeRuntime = !target; // explicit --target means partial uninstall; keep bin/.
   const summary = [
     dryRun ? 'Weave uninstall (dry-run).' : 'Weave uninstalled.',
@@ -282,7 +310,11 @@ function runUninstall({ dryRun, target, targets }) {
   for (const name of targets) {
     const adapter = adapters.getAdapter(name);
     if (adapter.readOnly) continue; // never wrote anything — skip silently
-    const { count, dir } = uninstallSkillsForTarget(adapter, { dryRun });
+    const { count, dir } = uninstallSkillsForTarget(adapter, {
+      dryRun,
+      scope,
+      cwd: process.cwd(),
+    });
     const suffix = count === 0 ? '(nothing to remove)' : `(${count} removed)`;
     summary.push(`  ${adapter.label.padEnd(12)} ←  ${dir} ${suffix}`);
   }

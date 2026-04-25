@@ -2,11 +2,11 @@
 
 > English: [README.md](README.md)
 
-**에이전트 코딩 CLI 용 워크플로우 컴포저** — Claude Code, opencode, Gemini CLI, Copilot CLI 지원. 설치된 CLI 의 플러그인·익스텐션에서 스킬을 자동 디스커버해 **재사용 가능한 preset**으로 엮고 step-by-step 실행을 오케스트레이션한다. 세션 상태를 파일시스템에 저장하기 때문에 컨텍스트 compaction·rollback·세션 간 재개가 가능하다.
+**에이전트 코딩 CLI 용 워크플로우 컴포저** — Claude Code, opencode, Gemini CLI, Copilot CLI, Codex 지원. 설치된 CLI 의 플러그인·익스텐션에서 스킬을 자동 디스커버해 **재사용 가능한 preset**으로 엮고 step-by-step 실행을 오케스트레이션한다. 세션 상태를 파일시스템에 저장하기 때문에 컨텍스트 compaction·rollback·세션 간 재개가 가능하다.
 
 - **리포:** [github.com/hpiece-cs/weave](https://github.com/hpiece-cs/weave)
-- **지원 CLI:** Claude Code, opencode, Gemini CLI, Copilot CLI
-  - 직접 설치 타겟(`--target=...`): `claude`, `opencode`, `gemini`
+- **지원 CLI:** Claude Code, opencode, Gemini CLI, Copilot CLI, Codex
+  - 직접 설치 타겟(`--target=...`): `claude`, `opencode`, `gemini`, `codex`
   - Copilot CLI 는 `~/.claude/skills/` 를 읽도록 설계됐기 때문에 `--target=claude` (또는 기본 설치) 만으로 자동으로 노출된다 — 별도 플래그 없음.
 - **Node:** 18+
 
@@ -93,7 +93,7 @@ Weave 의 설계 철학은 한 줄로 요약된다 — **"에이전트가 실행
 
 Weave 의 구성을 사용자 관점에서 단순화하면 이렇다:
 
-- **위 — 지시서 레이어.** 슬래시 커맨드(`/weave:compose`, `/weave:run`, …) 로 노출되는 스킬 13개. 에이전트가 읽고 실행한다.
+- **위 — 지시서 레이어.** 각 CLI 의 네이티브 명령 표면(`/weave:compose`, `/weave-run`, `/skills` 등) 으로 노출되는 스킬 13개. 에이전트가 읽고 실행한다.
 - **아래 — 상태 레이어.** preset, 세션, 산출물, 락. 전부 파일이고, 전부 사람이 읽을 수 있다.
 
 이 분리 덕분에 Weave 는 특정 에이전트 구현에 묶이지 않고, 모델 · CLI · 버전 업그레이드에 영향을 거의 받지 않는다.
@@ -129,6 +129,8 @@ cd weave
 ```bash
 node install.js                           # 구성된 모든 CLI 자동 감지
 node install.js --target=claude           # Claude Code 만
+node install.js --target=codex            # Codex 만 (전역 scope)
+node install.js --target=codex --scope=project
 node install.js --target=claude,opencode  # 여러 타겟 동시 설치
 node install.js --dry-run                 # 쓰기 없이 미리보기
 ```
@@ -140,19 +142,24 @@ node install.js --dry-run                 # 쓰기 없이 미리보기
   - `--target=claude` → `~/.claude/skills/weave-*/SKILL.md` → `/weave:*` (13개)
   - `--target=opencode` → `~/.config/opencode/command/weave-*.md` → `/weave-*` (13개)
   - `--target=gemini` → `~/.gemini/commands/weave/*.toml` → `/weave:*` (13개)
+  - `--target=codex` → `~/.codex/skills/weave-*/SKILL.md` (Codex native skills)
+  - `--target=codex --scope=project` → `<project>/.agents/skills/weave-*/SKILL.md`
 
 Copilot CLI 는 **claude 타겟에 포함된다**: Copilot 이 설계상 `~/.claude/skills/` 를 스캔하기 때문에 `--target=claude` 설치로 13개 weave 커맨드가 Copilot CLI 에도 `/weave-*` 형태로 그대로 노출된다. 별도의 Copilot 플래그는 없다.
 
-`--target` 생략 시 `~/.claude/` · `~/.gemini/` · `~/.config/opencode/` 를 감지해 존재하는 CLI 전부에 설치 (하나도 없으면 Claude Code 로 fallback).
+`--scope` 기본값은 `global` 이다. `--scope=project` 는 현재 `--target=codex` 에서만 지원한다. 자동 감지 설치는 항상 `global` scope 를 사용한다.
+
+`--target` 생략 시 `~/.claude/` · `~/.gemini/` · `~/.config/opencode/` · `.codex` · `.agents` 를 감지해 존재하는 CLI 전부에 설치 (하나도 없으면 Claude Code 로 fallback).
 
 설치는 idempotent — 다시 실행해도 안전.
 
 ### 3. 확인
 
-CLI 에서 `/weave` 를 입력하면 슬래시 커맨드 13개가 뜬다.
+CLI 별 진입점에서 Weave 가 보이면 된다.
 
 - Claude Code · Gemini CLI → `/weave:<name>` (네임스페이스 지원)
 - opencode · Copilot CLI → `/weave-<name>` (하이픈 — 네임스페이스를 평평하게 편다)
+- Codex → `/skills` 에서 native skill 로 노출되며, Codex의 `$skill-name` 문법으로 명시 호출 가능
 
 ### 업데이트
 
@@ -167,6 +174,8 @@ node install.js
 ```bash
 node install.js --uninstall                           # 감지된 모든 타겟 + 런타임 제거
 node install.js --uninstall --target=gemini           # 특정 CLI 만 제거 (런타임은 유지)
+node install.js --uninstall --target=codex            # Codex 전역 스킬만 제거
+node install.js --uninstall --target=codex --scope=project
 node install.js --uninstall --target=claude,opencode  # 여러 CLI 동시 제거
 node install.js --uninstall --dry-run                 # 실제 삭제 없이 미리보기
 ```
@@ -176,6 +185,8 @@ node install.js --uninstall --dry-run                 # 실제 삭제 없이 미
 - `--target=claude` → `~/.claude/skills/weave-*/` (Copilot CLI 가 참조하던 경로와 동일 — 같이 사라진다)
 - `--target=opencode` → `~/.config/opencode/command/weave-*.md`
 - `--target=gemini` → `~/.gemini/commands/weave/*.toml` (비워지면 `weave/` 네임스페이스 디렉터리도 제거)
+- `--target=codex` → `~/.codex/skills/weave-*/`
+- `--target=codex --scope=project` → `<project>/.agents/skills/weave-*/`
 - `--target` 미지정 → 위 CLI 전부 **+** `~/.weave/bin/` (런타임)
 
 `~/.weave/workflows/` 는 **자동으로 지우지 않는다** — 전역 workflow preset 이 들어있는 사용자 데이터이기 때문. 필요 없으면 직접 삭제:
@@ -206,9 +217,18 @@ rm -rf ~/.weave ~/.claude/skills/weave-* ~/.gemini/commands/weave ~/.config/open
    /weave:status
    ```
 
-## 슬래시 커맨드
+## Command Surfaces
 
-지원 CLI 전부에 노출된다. Claude Code · Gemini CLI 는 `/weave:*`, opencode · Copilot CLI 는 `/weave-*`.
+지원 CLI 의 네이티브 진입점으로 노출된다. Claude Code · Gemini CLI 는 `/weave:*`, opencode · Copilot CLI 는 `/weave-*`, Codex 는 `/skills` 와 Codex의 `$skill-name` 명시 호출 문법을 사용한다.
+
+Codex 예시:
+
+```text
+/skills            # 설치된 Weave skill 목록 보기
+$weave-run my-flow
+$weave-status
+$weave-compose
+```
 
 | 커맨드 | 용도 |
 |---|---|
@@ -225,6 +245,8 @@ rm -rf ~/.weave ~/.claude/skills/weave-* ~/.gemini/commands/weave ~/.config/open
 | `/weave:manage` | preset 편집 / 복제 / 삭제 / 프로모트 / 디모트. |
 | `/weave:edit-session` | **진행 중** 세션의 스텝 skip / 새 스킬 insert (세션만 수정, preset 원본은 유지). |
 | `/weave:help` | 상황 적응형 도움말. |
+
+Codex 에서는 위 표를 대응되는 skill 이름으로 읽으면 된다: `weave-compose`, `weave-list`, `weave-run`, `weave-status` 등. `/skills`에서 찾거나 Codex의 `$skill-name` 형태로 명시 호출하면 된다.
 
 ## 파일 위치
 

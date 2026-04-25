@@ -4,14 +4,14 @@
 //
 // Skill root resolution (in precedence order):
 //   Repo:  <project-root>/.agents/skills/**/SKILL.md
-//   User:  $CODEX_HOME/skills/ (= ~/.codex/skills/, deprecated but still read)
-//   User:  $HOME/.agents/skills/
+//   User:  $CODEX_HOME/skills/ (= ~/.codex/skills/)
+//   User:  $HOME/.agents/skills/  (vendor-neutral compatibility path)
 //   Admin: /etc/codex/skills/  (skipped — we only read user/project)
 //
 // Codex does NOT read ~/.claude/skills/ — unlike opencode/copilot.
 //
-// Install side: not implemented — we do not emit Codex-native slash commands
-// (Codex has no direct /name slash, only the /skills menu).
+// Install side: supported for native skills only. We install the repo's
+// SKILL.md files directly into Codex-visible roots.
 
 'use strict';
 
@@ -23,20 +23,38 @@ function detect(home) {
     || fs.existsSync(path.join(home, '.agents'));
 }
 
-// Install is not meaningful for Codex yet — keep these as stubs so the
-// adapter interface is uniform, but install.js should skip this adapter.
-function targetDir(home) {
-  return path.join(home, '.agents', 'skills');
+function targetDir(home, options = {}) {
+  const scope = options.scope || 'global';
+  const cwd = options.cwd || process.cwd();
+  if (scope === 'project') {
+    return path.join(cwd, '.agents', 'skills');
+  }
+  return path.join(home, '.codex', 'skills');
 }
 
-function render() {
-  throw new Error('codex adapter: render() is not implemented (read-only adapter)');
+function render(skill) {
+  return {
+    filename: path.join(`weave-${skill.name}`, 'SKILL.md'),
+    content: skill.raw,
+  };
 }
 
-// Read-only adapter never writes files, so uninstall has nothing to clean up.
-// Provide the hook anyway so callers can treat every adapter uniformly.
-function uninstall() {
-  return { removed: [] };
+function uninstall(home, { dryRun = false, scope = 'global', cwd } = {}) {
+  const dir = targetDir(home, { scope, cwd });
+  const removed = [];
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return { removed };
+  }
+  for (const e of entries) {
+    if (!e.isDirectory() || !e.name.startsWith('weave-')) continue;
+    const full = path.join(dir, e.name);
+    if (!dryRun) fs.rmSync(full, { recursive: true, force: true });
+    removed.push(full);
+  }
+  return { removed };
 }
 
 module.exports = {
@@ -46,6 +64,5 @@ module.exports = {
   targetDir,
   render,
   uninstall,
-  readOnly: true,          // weave install.js should skip this adapter
   requiresBash: true,
 };

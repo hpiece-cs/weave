@@ -1,6 +1,6 @@
 ---
 name: weave-ref
-description: Search workflow artifacts across all completed steps. Supports keyword:/step:/type: prefixes, or freeform search across path + summary + keywords.
+description: "Search workflow artifacts across all completed steps. Supports keyword:/step:/type: prefixes, or freeform search across path + summary + keywords."
 processStage: tracking
 processOrder: 4.3
 lifecycleGroup: progress-monitoring
@@ -16,8 +16,8 @@ domain: session-query
 dataRole: artifact-searcher
 scope: project
 filePatterns:
-  - input: {proj}/.weave/session.json (outputs[]) + query string
-  - output: terminal display (matching artifacts with path, type, summary, keywords)
+  - input: "{proj}/.weave/session.json (outputs[]) + query string"
+  - output: "terminal display (matching artifacts with path, type, summary, keywords)"
 mutates: false
 frequency: variable
 ---

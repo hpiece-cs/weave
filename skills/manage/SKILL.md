@@ -16,8 +16,8 @@ domain: preset-management
 dataRole: preset-maintainer
 scope: global|project
 filePatterns:
-  - input: ~/.weave/workflows/*.json + .weave/workflows/*.json
-  - output: modified/deleted/cloned *.json presets
+  - input: "~/.weave/workflows/*.json + .weave/workflows/*.json"
+  - output: "modified/deleted/cloned *.json presets"
 mutates: true
 frequency: rare
 ---

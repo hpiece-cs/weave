@@ -2,6 +2,77 @@
 
 > English: [001-release-notes-v0.1.0.md](001-release-notes-v0.1.0.md)
 
+## v0.1.2 — Codex 지원
+
+**릴리스 일자:** 2026-04-25
+
+이제 Weave 를 **Codex CLI** 에도 정식으로 설치할 수 있습니다 — Claude Code · Gemini CLI · opencode · Copilot CLI 와 동급의 설치 타겟으로 추가됐습니다.
+
+### 무엇이 달라지나
+
+다른 CLI 에서 쓰던 Weave preset 을 Codex 에서도 그대로 실행할 수 있습니다. 별도 설정 없이, 설치만 하면 Codex 의 기본 skill 목록에 Weave 가 잡힙니다.
+
+### 설치
+
+쓰는 방식에 맞춰 scope 를 고르세요:
+
+```bash
+# 일반적인 경우 — 한 번 설치, 어디서나 사용
+node install.js --target=codex
+
+# 프로젝트 단위 설치 (예: 팀 공유 preset 을 레포에 커밋)
+node install.js --target=codex --scope=project
+```
+
+| Scope | 설치 위치 | 언제 쓰나 |
+|---|---|---|
+| `global` (기본값) | `~/.codex/skills/` | 모든 프로젝트에서 쓰는 개인 워크플로우 |
+| `project` | `<cwd>/.agents/skills/` | 레포에 커밋해 팀과 공유하는 설정 |
+
+> `--scope=project` 는 현재 Codex 에서만 지원합니다. 다른 타겟 (claude · gemini · opencode) 은 전역 설치만 지원합니다.
+
+### Codex 에서 사용하기
+
+Codex 는 `/weave:run` 같은 슬래시 커맨드 대신 **skill mention** 방식을 씁니다.
+
+1. Codex 에서 `/skills` 를 입력해 설치된 Weave skill 을 둘러보거나,
+2. 아래처럼 직접 호출하세요:
+
+   ```
+   $weave-run my-preset
+   $weave-status
+   $weave-compose
+   ```
+
+치트시트 — CLI 별 호출 방식:
+
+| 다른 CLI 에서 | Codex 에서 |
+|---|---|
+| `/weave:run` | `$weave-run` |
+| `/weave:status` | `$weave-status` |
+| `/weave:compose` | `$weave-compose` |
+| `/weave:list` | `$weave-list` |
+
+> 참고: Codex 에서는 커스텀 `/weave:*` 슬래시 진입점이 보장되지 않습니다. `/skills` 또는 `$skill-name` 을 사용하세요.
+
+### 제거
+
+```bash
+node install.js --uninstall --target=codex                  # 전역
+node install.js --uninstall --target=codex --scope=project  # 프로젝트 로컬
+```
+
+## v0.1.1 — 패치 릴리스
+
+**릴리스 일자:** 2026-04-22
+
+스킬 디스커버리와 preset 적용 안정성을 다듬은 버그 수정 릴리스.
+
+### 수정 사항
+
+- **프로젝트 경로 스킬 디스커버리.** workflow 스킬 자동 디스커버리에서 프로젝트 경로 기반 스킬 조회 로직 오류 수정.
+- **Preset 적용 검증.** preset 이 참조하는 스킬이 설치돼 있지 않을 때 누락 여부를 확인하도록 체크 로직 추가.
+
 ## v0.1.0 — 첫 공개 릴리스
 
 **릴리스 일자:** 2026-04-19

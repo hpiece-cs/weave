@@ -1,6 +1,6 @@
 {
   "name": "weave",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Agentic workflow composer — discover installed skills, chain them into reusable presets, orchestrate step-by-step execution with on-disk session state.",
   "author": {
     "name": "hpiece",

@@ -361,10 +361,26 @@ test('gemini.parseGeminiToml — empty body when no prompt field', () => {
   assert.strictEqual(parsed.body, '');
 });
 
-// ── readOnly adapter guards ───────────────────────────────
-test('codex.render throws (read-only adapter)', () => {
-  assert.throws(() => codex.render({}), /not implemented/);
-  assert.strictEqual(codex.readOnly, true);
+// ── Codex adapter ─────────────────────────────────────────
+test('codex.targetDir — global uses <home>/.codex/skills', () => {
+  assert.strictEqual(
+    codex.targetDir('/fake/home', { scope: 'global', cwd: '/fake/repo' }),
+    path.join('/fake/home', '.codex', 'skills')
+  );
+});
+
+test('codex.targetDir — project uses <cwd>/.agents/skills', () => {
+  assert.strictEqual(
+    codex.targetDir('/fake/home', { scope: 'project', cwd: '/fake/repo' }),
+    path.join('/fake/repo', '.agents', 'skills')
+  );
+});
+
+test('codex.render — verbatim copy into weave-<name>/SKILL.md', () => {
+  const parsed = adapters.parseSkillMd(SAMPLE);
+  const out = codex.render({ name: 'status', raw: SAMPLE, ...parsed });
+  assert.strictEqual(out.filename, path.join('weave-status', 'SKILL.md'));
+  assert.strictEqual(out.content, SAMPLE);
 });
 
 test('copilot.render throws (read-only adapter)', () => {
@@ -372,9 +388,10 @@ test('copilot.render throws (read-only adapter)', () => {
   assert.strictEqual(copilot.readOnly, true);
 });
 
-test('install.js --target=codex refuses (read-only)', () => {
+test('install.js --target=codex installs native skills under ~/.codex/skills', () => {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'weave-inst-readonly-'));
   try {
+    fs.mkdirSync(path.join(tmpHome, '.codex'), { recursive: true });
     const r = spawnSync(
       process.execPath,
       [path.resolve(__dirname, '..', 'install.js'), '--target=codex'],
@@ -384,8 +401,10 @@ test('install.js --target=codex refuses (read-only)', () => {
         encoding: 'utf8',
       }
     );
-    assert.notStrictEqual(r.status, 0);
-    assert.match(r.stderr, /read-only/);
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.ok(
+      fs.existsSync(path.join(tmpHome, '.codex', 'skills', 'weave-status', 'SKILL.md'))
+    );
   } finally {
     fs.rmSync(tmpHome, { recursive: true, force: true });
   }
@@ -508,8 +527,24 @@ test('opencode.uninstall — removes weave-*.md only', () => {
   }
 });
 
-test('codex/copilot.uninstall — noop (read-only adapters)', () => {
-  assert.deepStrictEqual(codex.uninstall('/fake', { dryRun: true }).removed, []);
+test('codex.uninstall — removes weave-* only in selected scope', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'weave-codex-un-'));
+  try {
+    const globalDir = codex.targetDir(tmpHome, { scope: 'global', cwd: '/fake/repo' });
+    fs.mkdirSync(path.join(globalDir, 'weave-status'), { recursive: true });
+    fs.writeFileSync(path.join(globalDir, 'weave-status', 'SKILL.md'), 'x');
+    fs.mkdirSync(path.join(globalDir, 'other-skill'), { recursive: true });
+    fs.writeFileSync(path.join(globalDir, 'other-skill', 'SKILL.md'), 'x');
+    const { removed } = codex.uninstall(tmpHome, { scope: 'global' });
+    assert.strictEqual(removed.length, 1);
+    assert.ok(!fs.existsSync(path.join(globalDir, 'weave-status')));
+    assert.ok(fs.existsSync(path.join(globalDir, 'other-skill')));
+  } finally {
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+});
+
+test('copilot.uninstall — noop (read-only adapter)', () => {
   assert.deepStrictEqual(copilot.uninstall('/fake', { dryRun: true }).removed, []);
 });
 
