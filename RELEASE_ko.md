@@ -1,6 +1,6 @@
 # 릴리스 노트
 
-> English: [001-release-notes-v0.1.0.md](RELEASE.md)
+> English: [RELEASE.md](RELEASE.md)
 
 ## v0.1.2 — Codex 지원
 
