@@ -1,6 +1,6 @@
 # Release Notes
 
-> 한국어: [001-release-notes-v0.1.0.ko.md](001-release-notes-v0.1.0.ko.md)
+> 한국어: [001-release-notes-v0.1.0.ko.md](RELEASE_Ko.md)
 
 ## v0.1.2 — Codex support
 
