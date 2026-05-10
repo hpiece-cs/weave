@@ -2,6 +2,31 @@
 
 > 한국어: [RELEASE_ko.md](RELEASE_ko.md)
 
+## v0.2.0 — Workflow listing improvements
+
+**Release date:** 2026-05-08
+
+Cleaner candidate lists in `weave-compose` and workflow editing — Weave's own commands stay out of the picker, Other phase classification is tightened, and non-skill entries can no longer slip in.
+
+### Highlights
+
+- **Hide Weave-provided skills from candidate lists.** `weave-compose` and `weave-edit-session` no longer surface Weave's own commands as workflow steps. Existing presets that already reference Weave skills keep running unchanged — this only filters new selections.
+- **Tighter Other phase.** `discover` now uses block-scalar descriptions for stage inference, applies deterministic phase scoring, reclassifies Other outliers, and excludes helper commands.
+- **Cleaner phase headers.** Compose phase groups now include a `sourceSummary` for clearer source attribution.
+- **Defensive entry filtering.** A new `workflow-skill-filter` module keeps non-skill entries out of candidate lists across both compose and edit-session paths.
+
+### Compatibility
+
+- Skill cache schema bumped (v3 → v10). The cache rebuilds automatically on next run; no manual action required.
+- Saved presets that reference Weave skills continue to execute — the filter only affects new candidate selection, not preset validation or execution.
+
+### Upgrade
+
+```bash
+git pull
+node install.js --target=<your-target>
+```
+
 ## v0.1.2 — Codex support
 
 **Release date:** 2026-04-25

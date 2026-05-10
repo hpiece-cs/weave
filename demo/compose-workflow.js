@@ -12,6 +12,7 @@ const discover = require('../core/scripts/discover.js');
 const storage = require('../core/scripts/storage.js');
 const paths = require('../core/scripts/paths.js');
 const skillCache = require('../core/scripts/skill-cache.js');
+const workflowSkillFilter = require('../core/scripts/workflow-skill-filter.js');
 
 // ── CLI flags ──
 // --single-pick       : /weave:edit-session 의 insert picker 용. 체크 최대 1개,
@@ -53,10 +54,7 @@ const i18n = {
     total: '총',
     cleared: '클리어됨',
     selectedAll: '모두 선택됨',
-    intentTpl: '{0} 스킬 / {1} {2} ({3})',   // {0}=n skills, {1}=n sources, {2}=source(s) label, {3}=joined source list
-    skillsWord: '스킬',
-    sourceWord: '소스',
-    sources: '소스',   // Korean doesn't pluralize
+    sourceSummaryTpl: '(소스 : {0})',
 
     // Status line verbs
     expanded: '확장',
@@ -143,10 +141,7 @@ const i18n = {
     total: 'total',
     cleared: 'Cleared',
     selectedAll: 'Selected all',
-    intentTpl: '{0} skills across {1} {2} ({3})',
-    skillsWord: 'skills',
-    sourceWord: 'source',
-    sources: 'sources',
+    sourceSummaryTpl: '(sources: {0})',
 
     // Status line verbs
     expanded: 'Expanded',
@@ -247,13 +242,6 @@ function cmplxBadge(c) {
 // 이 두 상수는 getSkillGroups() 콜백이 캐시 미스 시 동기 실행되며 참조하므로
 // 반드시 getSkillGroups 호출보다 앞서 선언되어야 한다 (TDZ 회피).
 
-// Skip weave's own skills (they are tools, not agentic workflow steps).
-const BROWSE_EXCLUDE_SOURCES = new Set([
-  'weave-compose', 'weave-run', 'weave-list', 'weave-manage', 'weave-status',
-  'weave-debug', 'weave-note', 'weave-history', 'weave-help', 'weave-next',
-  'weave-rollback', 'weave-ref',
-]);
-
 // Per-phase descriptions are sourced from i18n t.phases (see top of file).
 // STAGE_ORDER / phase labels themselves stay English (canonical in discover.js).
 
@@ -269,22 +257,12 @@ cachedGroups = _init.groups;
 function buildPerPhaseBrowseTemplatesFull(workflowOnly, byId) {
   // discover.js 가 이미 Agentic Workflow 만 골라 돌려주고(Layer A/B/C 배정·정렬 완료),
   // stageIndex 순 → source(methodology) 순 → curated step → alpha 로 정렬된 배열이 들어온다.
-  // compose 는 (1) weave-* 소스만 제외하고 (2) skill.phase 로 그룹핑하면 충분.
+  // compose 는 워크플로우 후보 공통 필터를 적용한 뒤 skill.phase 로 그룹핑한다.
   const byPhase = new Map();
 
   for (const s of workflowOnly) {
-    if (BROWSE_EXCLUDE_SOURCES.has(s.source)) continue;
+    if (!workflowSkillFilter.isVisibleWorkflowCandidate(s)) continue;
     const phase = s.phase || 'Other';
-    // 'Other' phase 는 분류되지 않은 스킬들의 더미통(catch-all) 이라 compose
-    // 브라우저의 그룹 리스트에서 완전히 숨긴다. 필요한 스킬이 여기 들어와
-    // 있으면 discover.js 의 STAGE_KEYWORDS / OVERRIDE_TABLE 에 매핑을 추가해
-    // 제 phase 로 옮기는 게 정석. 여기서 걸러내면 그룹 번호도 01~29 로
-    // 자연스럽게 연속된다.
-    //
-    // NOTE: 이 필터는 skill-cache 의 캐시에 반영되므로 필터 규칙을 바꾸면
-    // skill-cache.js 의 CACHE_SCHEMA_VERSION 도 함께 올려야 기존 캐시가
-    // 자동으로 폐기된다.
-    if (phase === 'Other') continue;
     if (!byPhase.has(phase)) {
       byPhase.set(phase, {
         phase,
@@ -301,7 +279,7 @@ function buildPerPhaseBrowseTemplatesFull(workflowOnly, byId) {
     const sourcesTouched = [...new Set(skills.map((s) => s.source))].sort();
     const desc = (t.phases && t.phases[phase]) || '';
     const num = String(i + 1).padStart(2, '0');
-    const sourceLabel = sourcesTouched.length === 1 ? t.sourceWord : t.sources;
+    const sourceSummary = tr(t.sourceSummaryTpl, sourcesTouched.join(', '));
     // Max visible width of `[source]` across skills in this phase — used
     // to align the skill-name column when rendering cross-source rows.
     const maxSrcWidth = skills.reduce(
@@ -312,7 +290,7 @@ function buildPerPhaseBrowseTemplatesFull(workflowOnly, byId) {
       id: `phase-${stageIndex}-${phase.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`,
       source: `${num}. ${phase}`,
       name: desc || phase,
-      intent: tr(t.intentTpl, skills.length, sourcesTouched.length, sourceLabel, sourcesTouched.join(', ')),
+      sourceSummary,
       crossSource: true,
       maxSrcWidth,
       // skills are already sorted by discover.js compareSkills (methodology → processOrder → numericPrefix → step → alpha)
@@ -591,10 +569,10 @@ function render() {
       const srcTag = padVisible(`${CYAN}[${t.source}]${RESET}`, MAX_PHASE_SRC_WIDTH);
       const label = padVisible(`${BOLD}${t.name}${RESET}`, MAX_PHASE_LABEL_WIDTH);
       const countStr = checked > 0
-        ? `${GREEN}(${checked}/${total} sel)${RESET}`
-        : `${DIM}(${checked}/${total} sel)${RESET}`;
-      const intent = `${DIM}${t.intent}${RESET}`;
-      const line = `${pointer} ${sign}  ${srcTag} ${label} ${countStr}  ${intent}`;
+        ? `${GREEN}(${checked}/${total})${RESET}`
+        : `${DIM}(${checked}/${total})${RESET}`;
+      const sourceSummary = t.sourceSummary ? `${DIM}${t.sourceSummary}${RESET}` : '';
+      const line = `${pointer} ${sign}  ${srcTag} ${label} ${countStr}  ${sourceSummary}`;
       emit(line, cols, { highlight: isCursor });
     } else if (row.type === 'skill') {
       const s = row.skill;
@@ -1059,17 +1037,6 @@ function cleanup() {
   process.stdin.pause();
 }
 
-process.on('SIGINT', () => {
-  cleanup();
-  if (SINGLE_PICK) {
-    writeSinglePickResult(null);
-    process.exit(130);
-  }
-  console.log(`\n${t.interrupt}`);
-  process.exit(130);
-});
-process.on('exit', cleanup);
-
 // ── Start ──
 function start() {
   if (!process.stdin.isTTY) {
@@ -1089,4 +1056,20 @@ function start() {
   process.stdout.on('resize', render);
 }
 
-start();
+if (require.main === module) {
+  process.on('SIGINT', () => {
+    cleanup();
+    if (SINGLE_PICK) {
+      writeSinglePickResult(null);
+      process.exit(130);
+    }
+    console.log(`\n${t.interrupt}`);
+    process.exit(130);
+  });
+  process.on('exit', cleanup);
+  start();
+}
+
+module.exports = {
+  buildPerPhaseBrowseTemplatesFull,
+};

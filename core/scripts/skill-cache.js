@@ -13,7 +13,15 @@ const sourceRegistry = require('./source-registry.js');
 //             각 그룹에 maxSrcWidth 필드를 추가했음.
 //   v2 → v3: fingerprint 구성을 source-registry.json 의 derivedPrefixes 로부터
 //             동적으로 계산. 하드코딩된 homeSkillSources 제거.
-const CACHE_SCHEMA_VERSION = 3;
+//   v3 → v4: discover.js stage inference now uses block-scalar descriptions and
+//             deterministic phase scoring, so cached groups may have new phases.
+//   v4 → v5: compose browse groups now include the catch-all Other phase.
+//   v5 → v6: compose Other group now includes only weave skills/commands.
+//   v6 → v7: compose browse groups now hide weave-provided skills in every phase.
+//   v7 → v8: compose browse groups show non-weave Other skills again.
+//   v8 → v9: discover.js reclassifies Other outliers and excludes helper commands.
+//   v9 → v10: compose browse groups include sourceSummary for phase headers.
+const CACHE_SCHEMA_VERSION = 10;
 
 function getCachePath(projectRoot) {
   return path.join(paths.projectCacheDir(projectRoot), 'skill-groups.json');

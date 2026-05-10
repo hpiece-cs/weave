@@ -29,9 +29,10 @@ const KNOWN_PREFIXES = [
 const E1_AGENT_PERSONA = /(talk\s+to\s+[A-Z]?\w+|requests?\s+the\s+[\w\s-]+?\s+(agent|expert|specialist|coach|strategist|maestro|oracle|analyst|architect|guru|master|designer|developer|writer|scrum\s+master|qa\s+architect|qa\s+engineer|engineer))/i;
 const E3_UTILITY_START = /^\s*(switch|reset|configure|install|uninstall|setup|set\s+up|initialize|manage|enable|disable|clean\s+up)\b/i;
 const E4_QUERY_START = /^\s*(show|display|list|help|about)\b/i;
+const E5_NON_WORKFLOW_META = /\b(asks?\s+for\s+help|what\s+to\s+do\s+next|what\s+to\s+start\s+with|party\s+mode|learn\s+testing|study\s+test\s+practices|route\s+freeform\s+text|right\s+\w+\s+command\s+automatically|automatically\s+advance\s+to\s+the\s+next|remove\s+(?:a\s+)?\w+\s+workspace|starting\s+any\s+conversation|skill\s+tool\s+invocation)\b/i;
 
 // Use \w* suffix to catch verb/noun variants (e.g., create/creates/creating, test/testing).
-const I1_VERB_ROOTS = 'creat|design|writ|generat|implement|review|test|plan|execut|analyz|refactor|build|produc|validat|orchestrat|complet|archiv|audit|develop|compos|ship|brainstorm|debug|research|edit|solv|conduct|identif|appl|map|verif|structur|facilitat|establish|transform|craft|gather|automat|trace|explor|determin|evolv|evol|improv|summar';
+const I1_VERB_ROOTS = 'creat|design|writ|generat|implement|review|test|plan|execut|analyz|refactor|build|produc|validat|orchestrat|complet|archiv|audit|develop|compos|ship|brainstorm|debug|research|edit|solv|conduct|identif|appl|map|verif|structur|facilitat|establish|transform|craft|gather|automat|trace|explor|determin|evolv|evol|improv|summar|surfac|promot';
 const I1_VERBS = new RegExp(`\\b(?:${I1_VERB_ROOTS})\\w*`, 'i');
 const I2_NOUN_ROOTS = 'spec|document|plan|prd|gdd|stor|epic|architectur|report|design\\s+system|feature|ux|narrative|brief|test|code|workflow|phase|step|checklist|process\\s+flow|milestone|task|roadmap|component|product|project|session|workshop|engineer|pipeline|methodolog';
 const I2_NOUNS = new RegExp(`\\b(?:${I2_NOUN_ROOTS})\\w*`, 'i');
@@ -94,6 +95,51 @@ function statOrNull(p) {
 
 // ──────────────────────────── parsing ────────────────────────────
 
+function stripYamlQuotes(value) {
+  return (value || '').trim().replace(/^["']|["']$/g, '');
+}
+
+function foldYamlBlock(lines, mode) {
+  const nonBlankIndents = lines
+    .filter((line) => line.trim())
+    .map((line) => {
+      const m = line.match(/^[ \t]*/);
+      return m ? m[0].length : 0;
+    });
+  const trimBy = nonBlankIndents.length ? Math.min(...nonBlankIndents) : 0;
+  const normalized = lines
+    .map((line) => line.slice(Math.min(trimBy, line.length)).trimEnd());
+  // Descriptions are consumed as one-line summaries throughout discover.
+  // Fold both literal and folded block styles to keep downstream regexes stable.
+  return normalized
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(mode === 'literal' ? ' ' : ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function readFrontmatterField(frontmatter, key) {
+  const lines = (frontmatter || '').split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const m = line.match(new RegExp(`^${key}:\\s*(.*)$`));
+    if (!m) continue;
+    const raw = (m[1] || '').trim();
+    if (raw === '|' || raw === '>' || raw === '|-' || raw === '>-' || raw === '|+' || raw === '>+') {
+      const blockLines = [];
+      for (let j = i + 1; j < lines.length; j++) {
+        const next = lines[j];
+        if (/^\S/.test(next)) break;
+        blockLines.push(next);
+      }
+      return foldYamlBlock(blockLines, raw.startsWith('|') ? 'literal' : 'folded');
+    }
+    return stripYamlQuotes(raw);
+  }
+  return undefined;
+}
+
 function parseSkillMd(content, filePath) {
   const m = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!m) {
@@ -101,20 +147,20 @@ function parseSkillMd(content, filePath) {
   }
   const fm = m[1];
   const body = m[2];
-  const nameM = fm.match(/^name:\s*(.+)$/m);
-  const descM = fm.match(/^description:\s*(.+)$/m);
-  const processStageM = fm.match(/^processStage:\s*(.+)$/m);
-  const processOrderM = fm.match(/^processOrder:\s*(.+)$/m);
-  const lifecycleOrderM = fm.match(/^lifecycleOrder:\s*(.+)$/m);
+  const name = readFrontmatterField(fm, 'name') || '';
+  const description = readFrontmatterField(fm, 'description') || '';
+  const processStage = readFrontmatterField(fm, 'processStage');
+  const processOrder = readFrontmatterField(fm, 'processOrder');
+  const lifecycleOrder = readFrontmatterField(fm, 'lifecycleOrder');
   return {
-    name: nameM ? nameM[1].trim() : '',
-    description: descM ? descM[1].trim().replace(/^["']|["']$/g, '') : '',
+    name,
+    description,
     body,
     frontmatter: fm,
     path: filePath,
-    processStage: processStageM ? processStageM[1].trim() : undefined,
-    processOrder: processOrderM ? parseFloat(processOrderM[1].trim()) : undefined,
-    lifecycleOrder: lifecycleOrderM ? parseFloat(lifecycleOrderM[1].trim()) : undefined,
+    processStage,
+    processOrder: processOrder != null ? parseFloat(processOrder) : undefined,
+    lifecycleOrder: lifecycleOrder != null ? parseFloat(lifecycleOrder) : undefined,
   };
 }
 
@@ -177,7 +223,7 @@ const STAGE_KEYWORDS = [
   ['Test Strategy',             /\b(test-design|test-framework|\batdd\b|test-driven-development|\btdd\b)\b/i],
   ['Test — Automation',         /\b(test-automate|e2e-scaffold|\be2e\b|qa-generate-e2e|add-tests|automate-tests)\b/i],
   ['QA — NFR',                  /\b(\bnfr\b|performance-test|performance-profil)\b/i],
-  ['QA — Review/Trace',         /\b(test-review|\btrace\b|traceability|validate-phase|audit-uat|verification-before-completion|verify-work)\b/i],
+  ['QA — Review/Trace',         /\b(test-review|\btrace\b|traceability|validate-phase|audit-uat|verification-before-completion|verify-work|review-adversarial-general|critical-review|critical review|peer-review|peer review|cross-ai peer review)\b/i],
   ['User Testing',              /\b(playtest|uat)\b/i],
 
   // Code Review before generic 'review'
@@ -188,11 +234,11 @@ const STAGE_KEYWORDS = [
 
   // Implementation
   ['Implementation — Assets',   /\b(asset-generation)\b/i],
-  ['Implementation — Dev',      /\b(dev-story|quick-dev(-new-preview)?|execute-phase|\bautonomous\b|executing-plans|subagent-driven|agentic-development|quick-flow|implement\w*|\bexecut\w*)\b/i],
+  ['Implementation — Dev',      /\b(dev-story|quick-dev(-new-preview)?|execute-phase|\bautonomous\b|executing-plans|subagent-driven|dispatching-parallel-agents|parallel-agents|writing-skills|creating-new-skills|editing-existing-skills|verifying-skills|agentic-development|quick-flow|implement\w*|\bexecut\w*)\b/i],
 
   // Planning (sprint > stories > epics — sprint is most specific)
-  ['Planning — Sprint',         /\b(sprint-planning|sprint-status|plan-milestone-gaps|add-phase|insert-phase|\broadmap\b)\b/i],
-  ['Planning — Stories',        /\b(create-story|plan-phase|discuss-phase|writing-plans|create-the-next-story)\b/i],
+  ['Planning — Sprint',         /\b(sprint-planning|sprint-status|plan-milestone-gaps|review-backlog|promote-backlog|promote backlog|backlog items? to active milestone|add-phase|insert-phase|\broadmap\b)\b/i],
+  ['Planning — Stories',        /\b(create-story|plan-phase|discuss-phase|list-phase-assumptions|phase-assumptions|workflow-builder|build-workflow|build a workflow|modify-workflow|modify a workflow|quality-check-workflow|quality check workflow|writing-plans|create-the-next-story)\b/i],
   ['Planning — Epics',          /\b(create-epics|epics-and-stories|\bepic\w*)\b/i],
 
   // Design (asset spec > narrative > architecture > UX)
@@ -217,6 +263,43 @@ const STAGE_KEYWORDS = [
   ['Progress',                  /\b(session-report|\bprogress\b|\bstats\b|add-todo|check-todos|\bnote\b|add-backlog|plant-seed|\bthread\b|workstreams|list-workspaces)\b/i],
   ['Docs',                      /\b(distillator|index-docs|shard-doc|generate-project-context|editorial-review|map-codebase)\b/i],
   ['Control',                   /\b(correct-course|pause-work|resume-work|rollback|debug\w*|forensics|\bmanager\b|\bhealth\b|cleanup|restore|reapply-patches)\b/i],
+];
+
+// Deterministic fallback classifier. Profiles are broad semantic aliases for
+// the canonical stages; they are scored instead of matched as one-shot regexes.
+const MIN_PROFILE_SCORE = 5;
+const MIN_PROFILE_MARGIN = 2;
+const PHASE_PROFILES = [
+  ['Requirements — Validation', [['validate prd', 5], ['implementation readiness', 5], ['readiness', 3], ['validation', 3]]],
+  ['Requirements — Mapping', [['trigger mapping', 5], ['scenario', 4], ['journey', 2], ['mapping', 3]]],
+  ['Requirements — Spec', [['prd', 5], ['gdd', 5], ['requirements', 4], ['spec', 4], ['product requirements', 5]]],
+  ['Test Strategy', [['test strategy', 5], ['test design', 5], ['test framework', 5], ['atdd', 5], ['tdd', 4], ['testing approach', 4]]],
+  ['Test — Automation', [['e2e', 5], ['automate test', 5], ['test automation', 5], ['scaffold', 3], ['regression test', 4]]],
+  ['QA — NFR', [['performance', 4], ['performance regression', 6], ['core web vitals', 6], ['latency', 4], ['resource size', 4], ['resource sizes', 4], ['benchmark', 5], ['metric', 3], ['metrics', 3], ['baseline', 3]]],
+  ['QA — Review/Trace', [['traceability', 5], ['trace', 4], ['test review', 5], ['critical review', 6], ['peer review', 6], ['cross ai peer review', 7], ['phase plan review', 6], ['verification', 3], ['audit', 3], ['quality gate', 4], ['developer experience audit', 6], ['devex', 5], ['getting started flow', 4], ['friction', 3], ['error messages', 3], ['tthw', 4]]],
+  ['User Testing', [['qa', 5], ['web application', 3], ['browser testing', 4], ['test this site', 5], ['does this work', 4], ['screenshot', 3], ['screenshots', 3], ['health score', 3], ['re verify', 3], ['re verifies', 3], ['re verifying', 3], ['ai controlled chromium', 5], ['browser window', 4], ['visible browser', 4], ['cookie', 3], ['cookies', 3]]],
+  ['Code Review', [['code review', 6], ['pr review', 5], ['diff', 3], ['base branch', 3], ['review diff', 5], ['adversarial review', 5], ['independent diff review', 6], ['challenge', 2], ['consult', 2]]],
+  ['CI/CD', [['ci cd', 6], ['ci pipeline', 5], ['github actions', 4], ['deployment pipeline', 4], ['deploy platform', 3]]],
+  ['Implementation — Assets', [['asset generation', 6], ['asset spec', 4], ['sprite', 3], ['image generation', 4]]],
+  ['Implementation — Dev', [['implement', 4], ['implementation', 4], ['source code', 4], ['code edit', 4], ['fix bugs', 3], ['refactor', 3], ['execute plan', 4], ['development', 3], ['parallel agents', 5], ['independent tasks', 4], ['shared state', 3], ['writing skills', 5], ['creating new skills', 6], ['editing existing skills', 6], ['verifying skills', 4], ['codify', 4], ['permanent browser skill', 5], ['browser skill', 4]]],
+  ['Planning — Sprint', [['sprint', 5], ['roadmap', 4], ['milestone plan', 4], ['sprint planning', 6], ['review backlog', 5], ['promote backlog', 5], ['active milestone', 4]]],
+  ['Planning — Stories', [['story', 4], ['execution plan', 3], ['plan review', 3], ['implementation plan', 4], ['task plan', 4], ['workflow builder', 5], ['build workflow', 5], ['modify workflow', 5], ['quality check workflow', 5], ['phase assumptions', 5], ['phase approach', 4], ['review pipeline', 5], ['approval gate', 4], ['decision principles', 4], ['auto review', 5], ['autoplan', 5]]],
+  ['Planning — Epics', [['epic', 5], ['epics', 5], ['feature breakdown', 4]]],
+  ['Design — Asset Spec', [['asset spec', 6], ['design asset', 5], ['asset design', 4]]],
+  ['Design — Narrative/Content', [['narrative', 5], ['storytelling', 5], ['content', 3], ['copy', 2]]],
+  ['Design — Architecture', [['architecture', 5], ['architectural', 5], ['data flow', 5], ['diagram', 3], ['diagrams', 3], ['technical review', 5], ['engineering review', 5], ['system design', 5], ['edge cases', 3]]],
+  ['Design — UX', [['ux', 5], ['design system', 5], ['visual', 4], ['visual qa', 6], ['designer', 4], ['design review', 7], ['spacing', 3], ['hierarchy', 3], ['design polish', 5], ['mockup', 3], ['layout', 3], ['interface', 2]]],
+  ['Research', [['research', 5], ['market', 3], ['technical research', 6], ['competitor', 3], ['landscape', 3], ['pull data', 5], ['web page', 3], ['scrape', 5], ['json', 2], ['dataset', 3]]],
+  ['Discovery', [['brainstorm', 5], ['ideate', 4], ['idea', 2], ['office hours', 5], ['problem solving', 5], ['explore', 3], ['exploration', 3], ['ceo founder', 5], ['founder mode', 5], ['scope expansion', 4], ['10 star product', 5], ['rethink problem', 4]]],
+  ['Alignment', [['alignment', 5], ['brief', 4], ['project brief', 5], ['product brief', 5], ['signoff', 4]]],
+  ['Onboarding', [['setup', 4], ['set up', 4], ['init', 4], ['initialize', 4], ['new project', 5], ['workspace', 3], ['getting started', 4]]],
+  ['Retrospective', [['retrospective', 6], ['retro', 5], ['weekly', 2], ['commit history', 4], ['work patterns', 4]]],
+  ['Milestone Close', [['complete milestone', 6], ['milestone summary', 5], ['archive', 4], ['close milestone', 5]]],
+  ['Integration & Ship', [['ship', 5], ['shipping', 5], ['merge', 4], ['pull request', 4], ['create pr', 5], ['deploy', 4], ['release', 4], ['land', 3]]],
+  ['Evolution', [['product evolution', 6], ['brownfield', 5], ['evolution', 4], ['improvement', 3]]],
+  ['Control', [['restore', 5], ['rollback', 5], ['debug', 4], ['safety', 4], ['guardrail', 4], ['guardrails', 4], ['destructive', 4], ['freeze', 4], ['unfreeze', 4], ['configure', 3], ['settings', 3], ['self tuning', 5], ['question sensitivity', 4], ['preferences', 3], ['pair agent', 4], ['remote ai agent', 4], ['pair remote ai agent', 5], ['setup key', 4], ['upgrade', 5], ['update', 3], ['latest version', 4]]],
+  ['Docs', [['documentation', 5], ['document', 3], ['readme', 4], ['architecture md', 4], ['contributing', 3], ['changelog', 5], ['pdf', 3], ['markdown', 3], ['search guidance', 4], ['index', 3], ['sync', 4], ['gbrain', 4]]],
+  ['Progress', [['save progress', 6], ['context save', 6], ['working context', 5], ['resume later', 4], ['remaining work', 4], ['session handoff', 5], ['checkpoint', 4], ['progress', 4]]],
 ];
 
 // ── OVERRIDE_TABLE — Layer A step ② (outliers, ≤20 entries) ──
@@ -319,22 +402,98 @@ function inferStageByKeywords(name, description) {
   return null;
 }
 
-function classifyStage({ id, name = '', description = '', processStage } = {}) {
+function normalizeStageText(text) {
+  return (text || '')
+    .toLowerCase()
+    .replace(/[’']/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function containsProfileTerm(text, term) {
+  const normalizedTerm = normalizeStageText(term);
+  if (!normalizedTerm) return false;
+  if (normalizedTerm.includes(' ')) return text.includes(normalizedTerm);
+  return new RegExp(`(^|\\s)${normalizedTerm}(?:s|es|ed|ing)?(?=\\s|$)`).test(text);
+}
+
+function scoreStageByProfiles({ id = '', name = '', description = '', body = '', source = '', path: filePath = '' } = {}) {
+  const bodyForScoring = (description || '').trim().length < 20 ? body : '';
+  const corpus = normalizeStageText([
+    id,
+    name,
+    source,
+    filePath ? path.basename(path.dirname(filePath)) : '',
+    description,
+    bodyForScoring,
+  ].filter(Boolean).join(' '));
+
+  let best = null;
+  let second = null;
+  for (const [phase, terms] of PHASE_PROFILES) {
+    let score = 0;
+    const evidence = [];
+    for (const [term, weight] of terms) {
+      if (containsProfileTerm(corpus, term)) {
+        score += weight;
+        evidence.push(term);
+      }
+    }
+    const result = { phase, score, evidence };
+    if (!best || result.score > best.score) {
+      second = best;
+      best = result;
+    } else if (!second || result.score > second.score) {
+      second = result;
+    }
+  }
+
+  const margin = best && second ? best.score - second.score : (best ? best.score : 0);
+  if (!best || best.score < MIN_PROFILE_SCORE || margin < MIN_PROFILE_MARGIN) {
+    return null;
+  }
+  return {
+    phase: best.phase,
+    explicit: false,
+    source: 'score',
+    score: best.score,
+    confidence: margin,
+    evidence: best.evidence,
+  };
+}
+
+function stageResult(phase, explicit, source) {
+  return { phase, explicit, source, score: null, confidence: null, evidence: [] };
+}
+
+function classifyStage({ id, name = '', description = '', body = '', source, path: filePath, processStage } = {}) {
   // ① frontmatter
   if (processStage && STAGE_INDEX[processStage] != null) {
-    return { phase: processStage, explicit: true, source: 'frontmatter' };
+    return stageResult(processStage, true, 'frontmatter');
   }
   // ② override table
   if (id && OVERRIDE_TABLE[id]) {
-    return { phase: OVERRIDE_TABLE[id], explicit: true, source: 'override' };
+    return stageResult(OVERRIDE_TABLE[id], true, 'override');
   }
-  // ③ keyword inference
-  const keywordStage = inferStageByKeywords(name, description);
+  // ③ name keyword fast path. Name matches are usually stable methodology
+  // identifiers; description matches are deferred until after scoring.
+  const nameKeywordStage = inferStageByKeywords(name, '');
+  if (nameKeywordStage) {
+    return stageResult(nameKeywordStage, false, 'keyword');
+  }
+  // ④ deterministic scoring from rich metadata.
+  const scoredStage = scoreStageByProfiles({ id, name, description, body, source, path: filePath });
+  if (scoredStage) {
+    return scoredStage;
+  }
+  // ⑤ description keyword fallback.
+  const keywordStage = inferStageByKeywords('', description);
   if (keywordStage) {
-    return { phase: keywordStage, explicit: false, source: 'keyword' };
+    return stageResult(keywordStage, false, 'keyword');
   }
-  // ④ fallback
-  return { phase: 'Other', explicit: false, source: 'fallback' };
+  // ⑥ fallback
+  return stageResult('Other', false, 'fallback');
 }
 
 // Backward-compat: 기존 호출부는 (name, description) 으로만 쓰므로 시그니처 유지.
@@ -344,6 +503,9 @@ function inferPhase(name, description, options = {}) {
     id: options.id,
     name,
     description,
+    body: options.body,
+    source: options.source,
+    path: options.path,
     processStage: options.processStage,
   });
 }
@@ -734,6 +896,10 @@ function classifyComponent(parsed, name) {
     isAtomic = true;
     exclusionReason = 'E4 query/help';
     signals.push('E4');
+  } else if (E5_NON_WORKFLOW_META.test(`${name || ''}\n${text}`)) {
+    isAtomic = true;
+    exclusionReason = 'E5 non-workflow helper/router/control/meta';
+    signals.push('E5');
   } else {
     // No exclusion → check inclusion signals (I1 ∧ I2).
     const i1 = I1_VERBS.test(text);
@@ -1052,6 +1218,9 @@ function discoverAll(options = {}) {
     // idName(source-stripped)을 name 로 넘겨 prefix 중복 없는 키워드 매칭 유지.
     const phaseResult = inferPhase(idName, parsed.description, {
       id,
+      source,
+      body: parsed.body,
+      path: filePath,
       processStage: parsed.processStage,
     });
 
@@ -1073,7 +1242,10 @@ function discoverAll(options = {}) {
       defaultCheckpoint: inferDefaultCheckpoint(parsed.description, parsed.body),
       phase: phaseResult.phase,
       phaseExplicit: phaseResult.explicit,
-      phaseSource: phaseResult.source,      // 'frontmatter' | 'override' | 'keyword' | 'fallback'
+      phaseSource: phaseResult.source,      // 'frontmatter' | 'override' | 'keyword' | 'score' | 'fallback'
+      phaseScore: phaseResult.score,
+      phaseConfidence: phaseResult.confidence,
+      phaseEvidence: phaseResult.evidence,
       stageIndex: stageIndexOf(phaseResult.phase),
       usageTrigger: extractUsageTrigger(parsed.description),
       inputs: extractInputs(parsed),
@@ -1121,6 +1293,7 @@ module.exports = {
   inferPhase,
   classifyStage,
   inferStageByKeywords,
+  scoreStageByProfiles,
   stageIndexOf,
   numericPrefixIndex,
   compareSkills,
@@ -1136,6 +1309,7 @@ module.exports = {
   STAGE_ORDER,
   STAGE_INDEX,
   STAGE_KEYWORDS,
+  PHASE_PROFILES,
   OVERRIDE_TABLE,
   DEFAULT_METHODOLOGY_PRIORITY,
   METHODOLOGY_STEP_INDEX,

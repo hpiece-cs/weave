@@ -2,6 +2,31 @@
 
 > English: [RELEASE.md](RELEASE.md)
 
+## v0.2.0 — 워크플로우 리스트 개선
+
+**릴리스 일자:** 2026-05-08
+
+`weave-compose` 와 워크플로우 편집 시 보이는 후보 목록을 정리했습니다. Weave 가 제공하는 자체 명령어는 picker 에서 숨기고, Other phase 분류를 더 정확하게 잡고, 스킬이 아닌 항목이 후보에 섞이는 경우도 방어합니다.
+
+### 주요 변경
+
+- **Weave 제공 스킬을 후보에서 숨김.** `weave-compose` 와 `weave-edit-session` 의 후보 목록에 Weave 자체 명령어가 더 이상 노출되지 않습니다. 이미 저장된 preset 이 Weave 스킬을 참조하는 경우는 그대로 실행됩니다 — 이번 변경은 새 선택/삽입 후보에만 적용됩니다.
+- **Other phase 분류 보정.** `discover` 가 block-scalar description 기반으로 stage 를 추론하고, phase 점수 결정성을 강화하며, Other outlier 를 재분류하고 helper command 를 제외합니다.
+- **phase 헤더 정리.** compose phase group 에 `sourceSummary` 를 추가해 출처 표기를 명확히 합니다.
+- **비스킬 entry 방어 필터.** 신규 `workflow-skill-filter` 모듈이 compose / edit-session 양쪽에서 스킬이 아닌 entry 를 후보 목록에 넣지 않도록 막습니다.
+
+### 호환성
+
+- skill cache schema 가 v3 → v10 으로 올라갑니다. 다음 실행 시 자동 재생성되며, 수동 조치는 필요 없습니다.
+- 이미 저장된 preset 에 Weave 스킬이 들어 있어도 실행은 정상 동작합니다 — 이번 필터는 신규 후보 선택에만 영향을 줍니다.
+
+### 업그레이드
+
+```bash
+git pull
+node install.js --target=<your-target>
+```
+
 ## v0.1.2 — Codex 지원
 
 **릴리스 일자:** 2026-04-25

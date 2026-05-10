@@ -13,7 +13,21 @@ function getRegistryPath(projectRoot) {
   return paths.projectRegistryFile(projectRoot);
 }
 
-const SCHEMA_VERSION = 1;
+// v2 → v3: metadata-marker rules now include frequency-based clustering.
+// Existing unknown or split source assignments are intentionally recomputed.
+const SCHEMA_VERSION = 3;
+
+const GENERIC_MARKERS = new Set([
+  'recommended',
+  'required',
+  'optional',
+  'default',
+  'deprecated',
+  'experimental',
+  'preview',
+  'beta',
+  'alpha',
+]);
 
 // ──────────────────────── derivation ────────────────────────
 
@@ -44,6 +58,32 @@ function longestMatch(dirName, boundaries) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+// Extract all methodology marker candidates from a parsed skill.
+// Description markers are returned before frontmatter markers so canonical
+// markers in the description beat incidental frontmatter labels.
+function extractMethodologyMarkers(parsed) {
+  const description = (parsed && parsed.description) || '';
+  const frontmatter = (parsed && parsed.frontmatter) || '';
+  const re = /\(([a-z][a-z0-9-]{2,})\)/gi;
+  const markers = [];
+  for (const text of [description, frontmatter]) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const marker = m[1].toLowerCase();
+      if (GENERIC_MARKERS.has(marker)) continue;
+      markers.push(marker);
+    }
+  }
+  return markers;
+}
+
+// Backward-compat helper — returns the last marker (legacy single-result API).
+function extractMethodologyMarker(parsed) {
+  const markers = extractMethodologyMarkers(parsed);
+  return markers.length ? markers[markers.length - 1] : null;
 }
 
 // Core — pure function (no fs/network).
@@ -79,8 +119,27 @@ function derivePrefixes(parsedList, options = {}) {
     if (counts.has(s) && counts.get(s) >= 1) seedBoundaries.add(s);
   }
 
+  // Frequency-based metadata-marker boundaries.
+  const markersByPath = new Map();
+  const markerCounts = new Map();
+  for (const item of clusterItems) {
+    const candidates = extractMethodologyMarkers(item.parsed);
+    if (candidates.length === 0) continue;
+    markersByPath.set(item.filePath, candidates);
+    const seen = new Set();
+    for (const marker of candidates) {
+      if (seen.has(marker)) continue;
+      seen.add(marker);
+      markerCounts.set(marker, (markerCounts.get(marker) || 0) + 1);
+    }
+  }
+  const trustedMarkers = new Set();
+  for (const [marker, count] of markerCounts) {
+    if (count >= minClusterSize) trustedMarkers.add(marker);
+  }
+
   // Union for the public prefix list.
-  const allBoundaries = new Set([...seedBoundaries, ...derivedBoundaries]);
+  const allBoundaries = new Set([...seedBoundaries, ...derivedBoundaries, ...trustedMarkers]);
 
   // Assign each candidate a source.
   const assignments = {};
@@ -110,8 +169,32 @@ function derivePrefixes(parsedList, options = {}) {
       };
       continue;
     }
-    // home-skill / project-skill: seed first (cap), then derivation, then orphan.
+    // home-skill / project-skill: marker, seed, derivation, then orphan.
     const dirName = path.basename(path.dirname(item.filePath));
+    const candidates = markersByPath.get(item.filePath) || [];
+    let acceptedMarker = null;
+    for (const marker of candidates) {
+      if (dirName === marker || dirName.startsWith(`${marker}-`)) {
+        acceptedMarker = marker;
+        break;
+      }
+    }
+    if (!acceptedMarker) {
+      for (const marker of candidates) {
+        if (trustedMarkers.has(marker)) {
+          acceptedMarker = marker;
+          break;
+        }
+      }
+    }
+    if (acceptedMarker) {
+      assignments[item.filePath] = {
+        source: acceptedMarker,
+        signal: 'metadata-marker',
+        firstSeen: nowIso(),
+      };
+      continue;
+    }
     const seedMatch = longestMatch(dirName, seedBoundaries);
     if (seedMatch) {
       assignments[item.filePath] = {
@@ -211,6 +294,8 @@ module.exports = {
   deleteRegistry,
   resolveSource,
   diffAssignments,
+  extractMethodologyMarker,
+  extractMethodologyMarkers,
   // Internal (exported for tests)
   buildPrefixCounts,
   longestMatch,

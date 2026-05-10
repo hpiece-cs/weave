@@ -10,6 +10,7 @@ const { execSync } = require('node:child_process');
 const paths = require('./paths.js');
 const storage = require('./storage.js');
 const discover = require('./discover.js');
+const workflowSkillFilter = require('./workflow-skill-filter.js');
 
 const STALE_LOCK_MS = 30_000;
 
@@ -336,7 +337,9 @@ function sessionOutline() {
 function findSkill(query) {
   const q = String(query || '').trim();
   if (!q) return { exact: null, suggestions: [] };
-  const all = discover.discoverAll({ workflowOnly: false });
+  const all = discover
+    .discoverAll({ workflowOnly: false })
+    .filter((skill) => workflowSkillFilter.isVisibleWorkflowCandidate(skill));
   const exact = all.find((s) => s.id === q) || null;
   if (exact) return { exact, suggestions: [] };
   const needle = q.toLowerCase();
